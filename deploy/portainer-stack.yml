@@ -1,0 +1,39 @@
+services:
+  star-office-ui:
+    image: star-office-ui:latest
+    container_name: star-office-ui
+    restart: unless-stopped
+    ports:
+      - "${STAR_OFFICE_UI_HOST_PORT:-19000}:19000"
+    environment:
+      STAR_BACKEND_PORT: "19000"
+      PYTHONPATH: "/app/backend"
+      STAR_OFFICE_ENV: "${STAR_OFFICE_ENV:-production}"
+      FLASK_SECRET_KEY: "${FLASK_SECRET_KEY:?set FLASK_SECRET_KEY in Portainer stack variables}"
+      ASSET_DRAWER_PASS: "${ASSET_DRAWER_PASS:?set ASSET_DRAWER_PASS in Portainer stack variables}"
+      OPENCLAW_WORKSPACE: "/app"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-nanobanana-pro}"
+    volumes:
+      - /home/opc/workspace/Star-Office-UI:/app
+      - /home/opc/workspace/Star-Office-UI/memory:/memory
+
+  star-office-ui-agent-push:
+    image: star-office-ui:latest
+    container_name: star-office-ui-agent-push
+    restart: unless-stopped
+    depends_on:
+      - star-office-ui
+    command: ["python", "-u", "office-agent-push.py"]
+    healthcheck:
+      disable: true
+    environment:
+      OFFICE_JOIN_KEY: "${OFFICE_JOIN_KEY:-ocj_example_team_01}"
+      OFFICE_AGENT_ID: "${OFFICE_AGENT_ID:-star}"
+      OFFICE_AGENT_NAME: "${OFFICE_AGENT_NAME:-Star}"
+      OFFICE_URL: "http://star-office-ui:19000"
+      OFFICE_LOCAL_STATE_FILE: "/app/state.json"
+      OFFICE_STALE_STATE_TTL: "${OFFICE_STALE_STATE_TTL:-600}"
+      PYTHONPATH: "/app/backend"
+    volumes:
+      - /home/opc/workspace/Star-Office-UI:/app

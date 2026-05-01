@@ -1,0 +1,27 @@
+.git
+.codex
+.openclaw
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+.env
+*.log
+*.out
+*.pid
+
+# Local runtime state must be bind-mounted, not baked into the image.
+state.json
+agents-state.json
+join-keys.json
+office-agent-state.json
+runtime-config.json
+memory/
+
+# Mutable/generated assets should stay on the host volume.
+assets/bg-history/
+assets/home-favorites/
+frontend/office_bg.png
+frontend/*.bak

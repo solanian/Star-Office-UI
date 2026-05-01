@@ -1,222 +1,221 @@
 # Star Office UI
 
-🌐 Language: **中文** | [English](./README.en.md) | [日本語](./README.ja.md)
+🌐 Language: [中文](./README_cn.md) | **English** | [한국어](./README_ko.md) | [日本語](./README.ja.md)
 
-![Star Office UI 封面](docs/screenshots/readme-cover-2.jpg)
+![Star Office UI Cover](docs/screenshots/readme-cover-2.jpg)
 
-**一个像素风格的 AI 办公室看板** —— 把 AI 助手的工作状态实时可视化，让你直观看到"谁在做什么、昨天做了什么、现在是否在线"。
+**A pixel-art AI office dashboard** — visualize your AI assistant's work status in real time, so you can see at a glance who's doing what, what they did yesterday, and whether they're online.
 
-支持多 Agent 协作、中英日三语、AI 生图装修、桌面宠物模式。
-与 [OpenClaw](https://github.com/openclaw/openclaw) 深度集成时体验最佳，也可以独立部署作为状态看板使用。
+Supports multi-agent collaboration, trilingual UI (CN/EN/JP), AI-powered room design, and desktop pet mode.
+Best experienced with [OpenClaw](https://github.com/openclaw/openclaw), but also works standalone as a status dashboard.
 
-> 本项目由 **[Ring Hyacinth](https://x.com/ring_hyacinth)** 与 **[Simon Lee](https://x.com/simonxxoo)** 共同创建（co-created project），并与社区开发者（[@Zhaohan-Wang](https://github.com/Zhaohan-Wang)、[@Jah-yee](https://github.com/Jah-yee)、[@liaoandi](https://github.com/liaoandi)）一起持续维护和共建。
-> 欢迎提交 Issue 和 PR，也感谢每一位贡献者的支持。
+> This project was co-created by **[Ring Hyacinth](https://x.com/ring_hyacinth)** and **[Simon Lee](https://x.com/simonxxoo)**, and is continuously maintained and improved together with community contributors ([@Zhaohan-Wang](https://github.com/Zhaohan-Wang), [@Jah-yee](https://github.com/Jah-yee), [@liaoandi](https://github.com/liaoandi)).
+> Issues and PRs are welcome — thank you to everyone who contributes.
 
 ---
 
-## ✨ 快速体验
+## ✨ Quick Start
 
-### 方式一：让龙虾帮你部署（推荐给 OpenClaw 用户）
+### Option 1: Let your lobster deploy it (recommended for OpenClaw users)
 
-如果你正在使用 [OpenClaw](https://github.com/openclaw/openclaw)，直接把下面这句话发给你的龙虾：
+If you're using [OpenClaw](https://github.com/openclaw/openclaw), just send this to your lobster:
 
 ```text
-请按照这个 SKILL.md 帮我完成 Star Office UI 的部署：
+Please follow this SKILL.md to deploy Star Office UI for me:
 https://github.com/ringhyacinth/Star-Office-UI/blob/master/SKILL.md
 ```
 
-龙虾会自动完成 clone、安装依赖、启动后端、配置状态同步，并把访问地址发给你。
+Your lobster will automatically clone the repo, install dependencies, start the backend, configure status sync, and send you the access URL.
 
-### 方式二：30 秒手动部署
+### Option 2: 30-second manual setup
 
-> **环境要求：Python 3.10+**（代码使用了 `X | Y` union type 语法，不支持 3.9 及更低版本）
+> **Requires Python 3.10+** (the codebase uses `X | Y` union type syntax, which is not supported on 3.9 or earlier)
 
 ```bash
-# 1) 下载仓库
+# 1) Clone the repo
 git clone https://github.com/ringhyacinth/Star-Office-UI.git
 cd Star-Office-UI
 
-# 2) 安装依赖（需要 Python 3.10+）
+# 2) Install dependencies (Python 3.10+ required)
 python3 -m pip install -r backend/requirements.txt
 
-# 3) 准备状态文件（首次）
+# 3) Initialize state file (first run)
 cp state.sample.json state.json
 
-# 4) 启动后端
+# 4) Start the backend
 cd backend
 python3 app.py
 ```
 
-打开 **http://127.0.0.1:19000** 然后试试切状态：
+Open **http://127.0.0.1:19000** and try switching states:
 
 ```bash
-python3 set_state.py writing "正在整理文档"
-python3 set_state.py error "发现问题，排查中"
-python3 set_state.py idle "待命中"
+python3 set_state.py writing "Organizing documents"
+python3 set_state.py error "Found an issue, debugging"
+python3 set_state.py idle "Standing by"
 ```
 
-![Star Office UI 预览](docs/screenshots/readme-cover-1.jpg)
+![Star Office UI Preview](docs/screenshots/readme-cover-1.jpg)
 
 ---
 
-## 🤔 适合谁用？
+## 🤔 Who is this for?
 
-### 有 OpenClaw / AI Agent 的用户
-这是**完整体验**。Agent 在工作时自动切换状态，办公室里的像素角色会实时走到对应区域——你只需要打开网页，就能看到 AI 此刻在做什么。
+### Users with OpenClaw / an AI Agent
+This is the **full experience**. Your agent automatically switches status as it works, and the pixel character walks to the corresponding office area in real time — just open the page and see what your AI is doing right now.
 
-### 没有 OpenClaw 的用户
-也完全可以部署。你可以：
-- 用 `set_state.py` 或 API 手动 / 脚本推送状态
-- 把它当成一个像素风的个人状态页 / 远程办公看板
-- 接入任何能发 HTTP 请求的系统来驱动状态
-
-
----
-
-## 📋 功能一览
-
-1. **状态可视化** —— 6 种状态（`idle` / `writing` / `researching` / `executing` / `syncing` / `error`）自动映射到办公室不同区域，动画 + 气泡实时展示
-2. **昨日小记** —— 自动从 `memory/*.md` 读取最近一天的工作记录，脱敏后展示为"昨日小记"卡片
-3. **多 Agent 协作** —— 通过 join key 邀请其他 Agent 加入你的办公室，实时查看多人状态
-4. **中英日三语** —— CN / EN / JP 一键切换，界面文案、气泡、加载提示全部联动
-5. **美术资产自定义** —— 侧边栏管理角色 / 场景 / 装饰素材，支持动态帧同步，避免闪烁
-6. **AI 生图装修** —— 接入 Gemini API，用 AI 给办公室换背景；不接入 API 也能正常使用核心功能
-7. **移动端适配** —— 手机直接打开即可查看，适合外出时快速瞄一眼
-8. **安全加固** —— 侧边栏密码保护、生产环境弱密码拦截、Session Cookie 加固
-9. **灵活公网访问** —— 推荐 Cloudflare Tunnel 一键公网化，也可用自有域名 / 反向代理
-10. **桌面宠物版** —— 可选的 Electron 桌面封装，把办公室变成透明窗口的桌面宠物（见下方说明）
+### Users without OpenClaw
+You can still deploy and use it. You can:
+- Use `set_state.py` or the API to push status manually or via scripts
+- Use it as a pixel-art personal status page or remote work dashboard
+- Connect any system that can send HTTP requests to drive the status
 
 ---
 
-## 🚀 详细部署指南
+## 📋 Features
 
-### 1) 安装依赖
+1. **Status Visualization** — 6 states (`idle` / `writing` / `researching` / `executing` / `syncing` / `error`) mapped to different office areas with animated sprites and speech bubbles
+2. **Yesterday Memo** — Automatically reads the latest daily log from `memory/*.md`, sanitizes it, and displays it as a "Yesterday Memo" card
+3. **Multi-Agent Collaboration** — Invite other agents to join your office via join keys and see everyone's status in real time
+4. **Trilingual UI** — Switch between Chinese, English, and Japanese with one click; all UI text, bubbles, and loading messages update instantly
+5. **Custom Art Assets** — Manage characters, scenes, and decorations through the sidebar; dynamic frame sync prevents flickering
+6. **AI-Powered Room Design** — Connect your own Gemini API to generate new office backgrounds; core features work fine without an API
+7. **Mobile-Friendly** — Open on your phone for a quick status check on the go
+8. **Security Hardening** — Sidebar password protection, weak-password blocking in production, hardened session cookies
+9. **Flexible Public Access** — Use Cloudflare Tunnel for instant public access, or bring your own domain / reverse proxy
+10. **Desktop Pet Mode** — Optional Electron desktop wrapper that turns the office into a transparent desktop widget (see below)
+
+---
+
+## 🚀 Detailed Setup Guide
+
+### 1) Install dependencies
 
 ```bash
 cd Star-Office-UI
 python3 -m pip install -r backend/requirements.txt
 ```
 
-### 2) 初始化状态文件
+### 2) Initialize state file
 
 ```bash
 cp state.sample.json state.json
 ```
 
-### 3) 启动后端
+### 3) Start the backend
 
 ```bash
 cd backend
 python3 app.py
 ```
 
-打开 `http://127.0.0.1:19000`
+Open `http://127.0.0.1:19000`
 
-> ✅ 首次部署可以先保留默认配置；在生产环境中，请复制 `.env.example` 为 `.env` 并设置强随机的 `FLASK_SECRET_KEY` 与 `ASSET_DRAWER_PASS`，避免弱密码和会话泄露。
+> ✅ For local development you can start with the defaults; in production, copy `.env.example` to `.env` and set strong random values for `FLASK_SECRET_KEY` and `ASSET_DRAWER_PASS` to avoid weak passwords and session leaks.
 
-### 4) 切换状态
+### 4) Switch states
 
 ```bash
-python3 set_state.py writing "正在整理文档"
-python3 set_state.py syncing "同步进度中"
-python3 set_state.py error "发现问题，排查中"
-python3 set_state.py idle "待命中"
+python3 set_state.py writing "Organizing documents"
+python3 set_state.py syncing "Syncing progress"
+python3 set_state.py error "Found an issue, debugging"
+python3 set_state.py idle "Standing by"
 ```
 
-### 5) 公网访问（可选）
+### 5) Public access (optional)
 
 ```bash
 cloudflared tunnel --url http://127.0.0.1:19000
 ```
 
-拿到 `https://xxx.trycloudflare.com` 链接即可分享。
+Share the `https://xxx.trycloudflare.com` link with anyone.
 
-### 6) 验证安装（可选）
+### 6) Verify your installation (optional)
 
 ```bash
 python3 scripts/smoke_test.py --base-url http://127.0.0.1:19000
 ```
 
-所有检查显示 `OK` 即表示部署成功。
+If all checks report `OK`, your deployment is good to go.
 
 ---
 
-## 🦞 OpenClaw 深度集成
+## 🦞 OpenClaw Deep Integration
 
-> 以下内容面向 [OpenClaw](https://github.com/openclaw/openclaw) 用户。如果你不使用 OpenClaw，可以跳过这一节。
+> The following section is for [OpenClaw](https://github.com/openclaw/openclaw) users. If you don't use OpenClaw, feel free to skip this.
 
-### 状态自动同步
+### Automatic Status Sync
 
-在你的 `SOUL.md`（或 Agent 规则文件）中加入以下规则，让 Agent 自觉维护状态：
+Add the following rule to your `SOUL.md` (or agent config) so your agent updates its status automatically:
 
 ```markdown
-## Star Office 状态同步规则
-- 接到任务时：先执行 `python3 set_state.py <状态> "<描述>"` 再开始工作
-- 完成任务后：执行 `python3 set_state.py idle "待命中"` 再回复
+## Star Office Status Sync Rules
+- When starting a task: run `python3 set_state.py <state> "<description>"` before beginning work
+- When finishing a task: run `python3 set_state.py idle "Standing by"` before replying
 ```
 
-**6 种状态 → 3 个区域的映射：**
+**6 states → 3 office areas:**
 
-| 状态 | 办公室区域 | 触发场景 |
-|------|-----------|---------|
-| `idle` | 🛋 休息区（沙发） | 待命 / 任务完成 |
-| `writing` | 💻 工作区（办公桌） | 写代码 / 写文档 |
-| `researching` | 💻 工作区 | 搜索 / 调研 |
-| `executing` | 💻 工作区 | 执行命令 / 跑任务 |
-| `syncing` | 💻 工作区 | 同步数据 / 推送 |
-| `error` | 🐛 Bug 区 | 报错 / 异常排查 |
+| State | Office Area | When to use |
+|-------|-------------|-------------|
+| `idle` | 🛋 Breakroom (sofa) | Standing by / task complete |
+| `writing` | 💻 Workspace (desk) | Writing code or docs |
+| `researching` | 💻 Workspace | Searching / researching |
+| `executing` | 💻 Workspace | Running commands / tasks |
+| `syncing` | 💻 Workspace | Syncing data / pushing |
+| `error` | 🐛 Bug Corner | Error / debugging |
 
-### 邀请其他 Agent 加入办公室
+### Invite Other Agents to Your Office
 
-**Step 1：准备 join key**
+**Step 1: Prepare join keys**
 
-首次启动后端时，如果当前目录下不存在 `join-keys.json`，服务会自动根据 `join-keys.sample.json` 生成一个运行时的 `join-keys.json`（内含示例 key，例如 `ocj_example_team_01`）。你可以在生成后的 `join-keys.json` 中自行添加、修改或删除 key，每个 key 默认支持最多 3 人同时在线。
+When you start the backend for the first time, if there is no `join-keys.json` in the project root, the service will automatically create one based on `join-keys.sample.json` (which contains an example key such as `ocj_example_team_01`). You can then edit the generated `join-keys.json` to add, modify, or remove keys; by default each key supports up to 3 concurrent users.
 
-**Step 2：让访客 Agent 运行推送脚本**
+**Step 2: Have the guest run the push script**
 
-访客只需下载 `office-agent-push.py`，填写 3 个变量即可：
+The guest only needs to download `office-agent-push.py` and fill in 3 variables:
 
 ```python
-JOIN_KEY = "ocj_starteam02"          # 你分配的 key
-AGENT_NAME = "小明的龙虾"            # 显示名称
-OFFICE_URL = "https://office.hyacinth.im"  # 你的办公室地址
+JOIN_KEY = "ocj_starteam02"          # The key you assign
+AGENT_NAME = "Alice's Lobster"       # Display name
+OFFICE_URL = "https://office.hyacinth.im"  # Your office URL
 ```
 
 ```bash
 python3 office-agent-push.py
 ```
 
-脚本会自动加入办公室并每 15 秒推送一次状态。访客会出现在看板上，根据状态自动走到对应区域。
+The script auto-joins and pushes status every 15 seconds. The guest will appear on the dashboard, moving to the appropriate area based on their state.
 
-**Step 3（可选）：访客安装 Skill**
+**Step 3 (optional): Guest installs a Skill**
 
-访客也可以把 `frontend/join-office-skill.md` 作为 Skill 使用，Agent 会自动完成配置和推送。
+Guests can also use `frontend/join-office-skill.md` as a Skill — their agent will handle setup and pushing automatically.
 
-> 详细的访客接入说明见 [`frontend/join-office-skill.md`](./frontend/join-office-skill.md)
-
----
-
-## 📡 常用 API
-
-| 端点 | 说明 |
-|------|------|
-| `GET /health` | 健康检查 |
-| `GET /status` | 获取主 Agent 状态 |
-| `POST /set_state` | 设置主 Agent 状态 |
-| `GET /agents` | 获取多 Agent 列表 |
-| `POST /join-agent` | 访客加入办公室 |
-| `POST /agent-push` | 访客推送状态 |
-| `POST /leave-agent` | 访客离开 |
-| `GET /yesterday-memo` | 获取昨日小记 |
-| `GET /config/gemini` | 获取 Gemini API 配置 |
-| `POST /config/gemini` | 设置 Gemini API 配置 |
-| `GET /assets/generate-rpg-background/poll` | 轮询生图进度 |
+> See [`frontend/join-office-skill.md`](./frontend/join-office-skill.md) for full guest onboarding instructions.
 
 ---
 
-## 🖥 桌面宠物版（可选）
+## 📡 API Reference
 
-`desktop-pet/` 目录提供了一个基于 **Electron** 的桌面封装版本，可以把像素办公室变成一个透明窗口的桌面宠物。
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Health check |
+| `GET /status` | Get main agent status |
+| `POST /set_state` | Set main agent status |
+| `GET /agents` | List all agents |
+| `POST /join-agent` | Guest joins the office |
+| `POST /agent-push` | Guest pushes status |
+| `POST /leave-agent` | Guest leaves |
+| `GET /yesterday-memo` | Get yesterday's memo |
+| `GET /config/gemini` | Get Gemini API config |
+| `POST /config/gemini` | Set Gemini API config |
+| `GET /assets/generate-rpg-background/poll` | Poll image generation progress |
+
+---
+
+## 🖥 Desktop Pet Mode (Optional)
+
+The `desktop-pet/` directory contains a **Electron**-based desktop wrapper that turns the pixel office into a transparent desktop widget.
 
 ```bash
 cd desktop-pet
@@ -224,68 +223,68 @@ npm install
 npm run dev
 ```
 
-- 启动时自动拉起 Python 后端
-- 窗口默认指向 `http://127.0.0.1:19000/?desktop=1`
-- 支持通过环境变量自定义项目路径和 Python 路径
+- Auto-launches the Python backend on startup
+- Window points to `http://127.0.0.1:19000/?desktop=1` by default
+- Customizable via environment variables for project path and Python path
 
-> ⚠️ 这是一个**可选的实验性功能**，目前主要在 macOS 上开发测试。详见 [`desktop-pet/README.md`](./desktop-pet/README.md)。
+> ⚠️ This is an **optional, experimental feature**, primarily developed and tested on macOS. See [`desktop-pet/README.md`](./desktop-pet/README.md) for details.
 >
-> 🙏 桌面宠物版由 [@Zhaohan-Wang](https://github.com/Zhaohan-Wang) 独立开发，感谢他的贡献！
+> 🙏 The desktop pet module was independently developed by [@Zhaohan-Wang](https://github.com/Zhaohan-Wang) — thank you for this contribution!
 
 ---
 
-## 🎨 美术资产与开源许可
+## 🎨 Art Assets & License
 
-### 资产来源
+### Asset Attribution
 
-访客角色动画使用了 **LimeZu** 的免费资产：
+Guest character animations use free assets by **LimeZu**:
 - [Animated Mini Characters 2 (Platformer) [FREE]](https://limezu.itch.io/animated-mini-characters-2-platform-free)
 
-请在二次发布 / 演示时保留来源说明，并遵守原作者许可条款。
+Please keep attribution when redistributing or demoing, and follow the original license terms.
 
-### 许可协议
+### License
 
-- **代码 / 逻辑：MIT**（见 [`LICENSE`](./LICENSE)）
-- **美术资产：禁止商用**（仅学习 / 演示 / 交流用途）
+- **Code / Logic: MIT** (see [`LICENSE`](./LICENSE))
+- **Art Assets: Non-commercial use only** (learning / demo / sharing)
 
-> 如需商用，请将所有美术资产替换为你自己的原创素材。
-
----
-
-## 📝 更新日志
-
-| 日期 | 概要 | 详情 |
-|------|------|------|
-| 2026-03-06 | 🔌 默认端口调整 — 默认后端端口从 18791 调整为 19000，以避开 OpenClaw Browser Control 端口冲突；同步更新脚本、桌面壳与文档默认值 | [`docs/CHANGELOG_2026-03.md`](./docs/CHANGELOG_2026-03.md) |
-| 2026-03-05 | 📱 稳定性修复 — CDN 缓存修复、生图异步化、移动端侧边栏优化、Join Key 过期与并发控制 | [`docs/UPDATE_REPORT_2026-03-05.md`](./docs/UPDATE_REPORT_2026-03-05.md) |
-| 2026-03-04 | 🔒 P0/P1 安全加固 — 弱密码拦截、后端模块拆分、stale 状态自动回 idle、首屏骨架屏优化 | [`docs/UPDATE_REPORT_2026-03-04_P0_P1.md`](./docs/UPDATE_REPORT_2026-03-04_P0_P1.md) |
-| 2026-03-03 | 📋 开源发布检查清单完成 | [`docs/OPEN_SOURCE_RELEASE_CHECKLIST.md`](./docs/OPEN_SOURCE_RELEASE_CHECKLIST.md) |
-| 2026-03-01 | 🎉 **v2 重制发布** — 新增三语支持、资产管理系统、AI 生图装修、美术资产全面替换 | [`docs/FEATURES_NEW_2026-03-01.md`](./docs/FEATURES_NEW_2026-03-01.md) |
+> For commercial use, replace all art assets with your own original artwork.
 
 ---
 
-## 📁 项目结构
+## 📝 Changelog
+
+| Date | Summary | Details |
+|------|---------|---------|
+| 2026-03-06 | 🔌 Default port updated — backend default port changed from 18791 to 19000 to avoid conflicts with OpenClaw Browser Control; synced scripts, desktop shells, and docs defaults | [`docs/CHANGELOG_2026-03.md`](./docs/CHANGELOG_2026-03.md) |
+| 2026-03-05 | 📱 Stability fixes — CDN cache fix, async image generation, mobile sidebar UX, join key expiration & concurrency | [`docs/UPDATE_REPORT_2026-03-05.md`](./docs/UPDATE_REPORT_2026-03-05.md) |
+| 2026-03-04 | 🔒 P0/P1 Security hardening — weak password blocking, backend refactor, stale-state auto-idle, skeleton loading | [`docs/UPDATE_REPORT_2026-03-04_P0_P1.md`](./docs/UPDATE_REPORT_2026-03-04_P0_P1.md) |
+| 2026-03-03 | 📋 Open-source release checklist completed | [`docs/OPEN_SOURCE_RELEASE_CHECKLIST.md`](./docs/OPEN_SOURCE_RELEASE_CHECKLIST.md) |
+| 2026-03-01 | 🎉 **v2 Rebuild** — Trilingual support, asset management system, AI room design, full art asset overhaul | [`docs/FEATURES_NEW_2026-03-01.md`](./docs/FEATURES_NEW_2026-03-01.md) |
+
+---
+
+## 📁 Project Structure
 
 ```text
 Star-Office-UI/
-├── backend/            # Flask 后端
+├── backend/            # Flask backend
 │   ├── app.py
 │   ├── requirements.txt
 │   └── run.sh
-├── frontend/           # 前端页面与资产
+├── frontend/           # Frontend pages & assets
 │   ├── index.html
 │   ├── join.html
 │   ├── invite.html
 │   └── layout.js
-├── desktop-pet/        # Electron 桌面宠物版（可选）
-├── docs/               # 文档与截图
+├── desktop-pet/        # Electron desktop wrapper (optional)
+├── docs/               # Documentation & screenshots
 │   └── screenshots/
-├── office-agent-push.py  # 访客推送脚本
-├── set_state.py          # 状态切换脚本
-├── state.sample.json     # 状态文件模板
-├── join-keys.sample.json # Join Key 模板（启动时生成 join-keys.json）
+├── office-agent-push.py  # Guest push script
+├── set_state.py          # Status switch script
+├── state.sample.json     # State file template
+├── join-keys.sample.json # Join key template (runtime generates join-keys.json)
 ├── SKILL.md              # OpenClaw Skill
-└── LICENSE               # MIT 许可
+└── LICENSE               # MIT License
 ```
 
 ---

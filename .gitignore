@@ -14,7 +14,9 @@ venv/
 # Runtime state (local only)
 state.json
 agents-state.json
+office-agent-state.json
 runtime-config.json
+memory/
 *.log
 *.out
 *.pid
@@ -32,6 +34,17 @@ frontend/office_bg.png
 frontend/*.bak
 layers/
 desktop-pet/src-tauri/icons/*Logo.png
+
+# Local agent/session context (do not publish)
+.codex
+.codex/
+.openclaw/
+AGENTS.md
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md
 
 # Electron local build artifacts
 electron-shell/node_modules/

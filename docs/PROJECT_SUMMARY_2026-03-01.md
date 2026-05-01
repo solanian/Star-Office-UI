@@ -21,7 +21,7 @@
 ### 2) 固定可复用 Join Key 机制
 - 一次性 key 改为固定可复用 key：`ocj_starteam01` ~ `ocj_starteam08`。
 - 去掉了“used 即不可再用”的阻断逻辑，支持长期复用。
-- 加入了并发上限配置（`maxConcurrent`），默认每个 key 限 3 并发在线。
+- 2026-05-01 기준 현재 배포에서는 같은 key의 동시 agent 수 제한을 제거했습니다.
 
 ### 3) 并发限制修复（关键）
 - 发现 4 并发仍能通过的根因是后端竞争条件（race condition）。
@@ -72,7 +72,7 @@
   - join 并发限制加锁修复
   - offline/approved 授权流逻辑调整（便于恢复）
 - `join-keys.json`
-  - 固定 key + `maxConcurrent: 3`
+  - 고정 재사용 key. 현재 배포에서는 동시 agent 수 제한 없음.
 - `frontend/index.html`（及相关渲染逻辑）
   - 访客动画、名字与气泡定位优化
   - 状态文案映射调整

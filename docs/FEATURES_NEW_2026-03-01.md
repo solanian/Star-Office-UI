@@ -8,11 +8,11 @@
 ## 2. Join Key 机制升级
 - 从“一次性 key”升级为“固定可复用 key”。
 - 默认 key：`ocj_starteam01` ~ `ocj_starteam08`。
-- 保留安全控制：每个 key 的并发上限 `maxConcurrent`（默认 3）。
+- 2026-05-01 기준 현재 배포에서는 같은 key의 동시 agent 수 제한을 제거했습니다.
 
-## 3. 并发控制（已修复竞态）
-- 修复并发 join 的竞态问题（race condition）。
-- 同 key 第 4 个并发 join 会被正确拒绝（HTTP 429）。
+## 3. 동시 접속 정책
+- 같은 join key를 여러 agent가 동시에 재사용할 수 있습니다.
+- 현재 배포에서는 동시 agent 수로 join을 거절하지 않습니다.
 
 ## 4. 访客状态映射与区域渲染
 - `idle -> breakroom`
