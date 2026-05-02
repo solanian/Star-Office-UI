@@ -19,6 +19,7 @@ from datetime import datetime
 JOIN_KEY = os.environ.get("OFFICE_JOIN_KEY", "")   # 필수: 상태 푸시에 사용할 접속 키
 AGENT_NAME = os.environ.get("OFFICE_AGENT_NAME", "Star").strip() # 오피스에 표시할 이름
 AGENT_ID = os.environ.get("OFFICE_AGENT_ID", "").strip() # 선택: star로 지정하면 메인 캐릭터에 직접 연결
+OPENCLAW_AGENT_ID = os.environ.get("OFFICE_OPENCLAW_AGENT_ID", "").strip() # Web UI 대화가 호출할 OpenClaw agent id
 OFFICE_URL = os.environ.get("OFFICE_URL", "https://office.hyacinth.im")  # 海辛办公室地址（一般不用改）
 
 # === 推送配置 ===
@@ -217,6 +218,8 @@ def do_join(local):
         "state": "idle",
         "detail": "방금 참여했습니다"
     }
+    if OPENCLAW_AGENT_ID:
+        payload["openclawAgentId"] = OPENCLAW_AGENT_ID
     r = requests.post(f"{OFFICE_URL}{JOIN_ENDPOINT}", json=payload, timeout=10)
     if r.status_code in (200, 201):
         data = r.json()
@@ -239,6 +242,8 @@ def do_push(local, status_data):
         "detail": status_data.get("detail", ""),
         "name": local.get("agentName", AGENT_NAME)
     }
+    if OPENCLAW_AGENT_ID:
+        payload["openclawAgentId"] = OPENCLAW_AGENT_ID
     r = requests.post(f"{OFFICE_URL}{PUSH_ENDPOINT}", json=payload, timeout=10)
     if r.status_code in (200, 201):
         data = r.json()

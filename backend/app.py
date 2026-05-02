@@ -9,9 +9,12 @@ import random
 import math
 import re
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import threading
+import time
+import uuid
 from pathlib import Path
 from security_utils import is_production_mode, is_strong_secret, is_strong_drawer_pass
 from memo_utils import get_yesterday_date_str, sanitize_content, extract_memo_from_file
@@ -67,6 +70,21 @@ AUTO_ROTATE_MIN_INTERVAL_SECONDS = int(os.getenv("AUTO_ROTATE_MIN_INTERVAL_SECON
 _last_home_rotate_at = 0
 ASSET_DEFAULTS_FILE = os.path.join(ROOT_DIR, "asset-defaults.json")
 RUNTIME_CONFIG_FILE = os.path.join(ROOT_DIR, "runtime-config.json")
+DATA_DIR = os.environ.get("STAR_OFFICE_DATA_DIR") or ROOT_DIR
+CHAT_DB_FILE = os.environ.get("CHAT_DB_FILE") or os.path.join(DATA_DIR, "chat.db")
+OPENCLAW_CLI = os.environ.get("OPENCLAW_CLI", "openclaw").strip() or "openclaw"
+OPENCLAW_CHAT_DEFAULT_AGENT = os.environ.get("OPENCLAW_CHAT_AGENT", "star-office-ui").strip() or "star-office-ui"
+OPENCLAW_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "").strip()
+try:
+    OPENCLAW_CHAT_TIMEOUT_SECONDS = max(10, int(os.environ.get("OPENCLAW_CHAT_TIMEOUT", "600")))
+except ValueError:
+    OPENCLAW_CHAT_TIMEOUT_SECONDS = 600
+try:
+    OPENCLAW_CHAT_SEND_TIMEOUT_SECONDS = max(30, int(os.environ.get("OPENCLAW_CHAT_SEND_TIMEOUT", "300")))
+except ValueError:
+    OPENCLAW_CHAT_SEND_TIMEOUT_SECONDS = 300
+OPENCLAW_HISTORY_TIMEOUT_MS = min(120000, max(60000, OPENCLAW_CHAT_TIMEOUT_SECONDS * 1000))
+CHAT_WAITING_MESSAGE = "응답을 기다리는 중..."
 
 # Canonical agent states: single source of truth for validation and mapping
 VALID_AGENT_STATES = frozenset({"idle", "writing", "researching", "executing", "syncing", "error"})
@@ -314,6 +332,7 @@ DEFAULT_AGENTS = [
         "updated_at": datetime.now().isoformat(),
         "area": "breakroom",
         "source": "local",
+        "openclawAgentId": OPENCLAW_CHAT_DEFAULT_AGENT,
         "joinKey": None,
         "authStatus": "approved",
         "authExpiresAt": None,
@@ -352,6 +371,773 @@ def load_runtime_config():
 
 def save_runtime_config(data):
     _store_save_runtime_config(RUNTIME_CONFIG_FILE, data)
+
+
+chat_db_lock = threading.Lock()
+
+
+def _chat_db():
+    db_dir = os.path.dirname(os.path.abspath(CHAT_DB_FILE))
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+    conn = sqlite3.connect(CHAT_DB_FILE)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def init_chat_db():
+    with chat_db_lock:
+        with _chat_db() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id TEXT NOT NULL UNIQUE,
+                    agent_name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id INTEGER NOT NULL,
+                    role TEXT NOT NULL CHECK (role IN ('user', 'agent', 'system')),
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id, id)")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS chat_turns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id INTEGER NOT NULL,
+                    user_message_id INTEGER NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN ('pending', 'done', 'error')),
+                    openclaw_agent_id TEXT,
+                    gateway_run_id TEXT,
+                    gateway_accepted_at TEXT,
+                    reply_message_id INTEGER,
+                    error_message_id INTEGER,
+                    error_text TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_message_id) REFERENCES messages(id) ON DELETE CASCADE,
+                    FOREIGN KEY (reply_message_id) REFERENCES messages(id) ON DELETE SET NULL,
+                    FOREIGN KEY (error_message_id) REFERENCES messages(id) ON DELETE SET NULL
+                )
+            """)
+            existing_turn_cols = {row[1] for row in conn.execute("PRAGMA table_info(chat_turns)").fetchall()}
+            if "gateway_run_id" not in existing_turn_cols:
+                conn.execute("ALTER TABLE chat_turns ADD COLUMN gateway_run_id TEXT")
+            if "gateway_accepted_at" not in existing_turn_cols:
+                conn.execute("ALTER TABLE chat_turns ADD COLUMN gateway_accepted_at TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_turns_conversation_status ON chat_turns(conversation_id, status, id)")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_turns_one_pending ON chat_turns(conversation_id) WHERE status = 'pending'")
+
+
+def _normalize_chat_agent_id(agent_id: str) -> str:
+    value = (agent_id or "").strip()
+    if not value:
+        raise ValueError("agentId가 없습니다")
+    if len(value) > 128:
+        raise ValueError("agentId가 너무 깁니다")
+    return value
+
+
+def _normalize_chat_agent_name(agent_name: str, agent_id: str) -> str:
+    value = (agent_name or "").strip()
+    if not value:
+        agents = load_agents_state()
+        target = next((a for a in agents if a.get("agentId") == agent_id), None)
+        value = (target or {}).get("name") or agent_id
+    return value[:120]
+
+
+def _chat_openclaw_agent_map():
+    mapping = {"star": OPENCLAW_CHAT_DEFAULT_AGENT}
+    raw = os.environ.get("OPENCLAW_CHAT_AGENT_MAP", "").strip()
+    if not raw:
+        return mapping
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return mapping
+    if not isinstance(data, dict):
+        return mapping
+    for key, value in data.items():
+        key = str(key or "").strip()
+        value = str(value or "").strip()
+        if key and value:
+            mapping[key] = value
+    return mapping
+
+
+def _find_agent_record(agent_id: str):
+    try:
+        return next((a for a in load_agents_state() if a.get("agentId") == agent_id), None)
+    except Exception:
+        return None
+
+
+def _resolve_openclaw_agent_id(agent_id: str) -> str:
+    record = _find_agent_record(agent_id) or {}
+    explicit = (
+        record.get("openclawAgentId")
+        or record.get("openclaw_agent_id")
+        or record.get("openclawAgent")
+    )
+    if explicit:
+        return str(explicit).strip()
+    mapped = _chat_openclaw_agent_map().get(agent_id)
+    if mapped:
+        return mapped
+    return agent_id
+
+
+def _openclaw_session_key(agent_id: str, openclaw_agent_id: str) -> str:
+    safe_agent = re.sub(r"[^a-zA-Z0-9_.:-]+", "-", openclaw_agent_id or agent_id).strip("-")
+    safe_character = re.sub(r"[^a-zA-Z0-9_.:-]+", "-", agent_id).strip("-")
+    return f"agent:{safe_agent or 'main'}:webchat:{safe_character or 'agent'}"[:512]
+
+
+def _openclaw_gateway_env():
+    env = os.environ.copy()
+    path_parts = [
+        "/home/opc/.npm-global/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+    ]
+    existing_path = env.get("PATH", "")
+    env["PATH"] = ":".join([p for p in path_parts if p] + ([existing_path] if existing_path else []))
+    if not env.get("HOME") and os.path.exists("/home/opc/.openclaw"):
+        env["HOME"] = "/home/opc"
+    return env
+
+
+def _openclaw_gateway_call(method: str, params: dict | None = None, timeout_ms: int | None = None) -> dict:
+    timeout_ms = int(timeout_ms or max(10000, OPENCLAW_CHAT_TIMEOUT_SECONDS * 1000))
+    cmd = [
+        OPENCLAW_CLI,
+        "gateway",
+        "call",
+        method,
+        "--json",
+        "--timeout",
+        str(timeout_ms),
+        "--params",
+        json.dumps(params or {}, ensure_ascii=False),
+    ]
+    if OPENCLAW_GATEWAY_URL:
+        cmd.extend(["--url", OPENCLAW_GATEWAY_URL])
+
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=ROOT_DIR,
+            env=_openclaw_gateway_env(),
+            capture_output=True,
+            text=True,
+            timeout=(timeout_ms / 1000) + 15,
+        )
+    except FileNotFoundError:
+        raise RuntimeError(f"OpenClaw CLI를 찾지 못했습니다: {OPENCLAW_CLI}")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"OpenClaw Gateway 호출 시간이 초과되었습니다({timeout_ms}ms)")
+
+    stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip()
+    if result.returncode != 0:
+        detail = stderr or stdout or "unknown error"
+        raise RuntimeError(f"OpenClaw Gateway 호출 실패({result.returncode}): {detail[-1000:]}")
+
+    if not stdout:
+        return {}
+    try:
+        parsed = json.loads(stdout)
+    except Exception:
+        parsed = None
+        for line in reversed([line.strip() for line in stdout.splitlines() if line.strip()]):
+            if not line.startswith(("{", "[")):
+                continue
+            try:
+                parsed = json.loads(line)
+                break
+            except Exception:
+                continue
+    if not isinstance(parsed, dict):
+        raise RuntimeError(f"OpenClaw Gateway 응답을 해석하지 못했습니다: {(stdout or stderr)[-1000:]}")
+    return parsed
+
+
+def _openclaw_sessions_dir(openclaw_agent_id: str) -> Path:
+    safe_agent = re.sub(r"[^a-zA-Z0-9_.:-]+", "-", openclaw_agent_id or "").strip("-")
+    if not safe_agent:
+        raise RuntimeError("OpenClaw agent id가 없습니다")
+    openclaw_home = os.environ.get("OPENCLAW_HOME") or os.path.expanduser("~")
+    return Path(openclaw_home) / ".openclaw" / "agents" / safe_agent / "sessions"
+
+
+def _load_openclaw_session_entry(session_key: str, openclaw_agent_id: str) -> dict:
+    sessions_file = _openclaw_sessions_dir(openclaw_agent_id) / "sessions.json"
+    try:
+        with sessions_file.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    entry = data.get(session_key)
+    return entry if isinstance(entry, dict) else {}
+
+
+def _resolve_openclaw_session_file(session_key: str, openclaw_agent_id: str) -> Path | None:
+    entry = _load_openclaw_session_entry(session_key, openclaw_agent_id)
+    raw_file = str(entry.get("sessionFile") or "").strip()
+    if raw_file:
+        path = Path(raw_file)
+    else:
+        session_id = str(entry.get("sessionId") or "").strip()
+        if not session_id:
+            return None
+        path = _openclaw_sessions_dir(openclaw_agent_id) / f"{session_id}.jsonl"
+
+    sessions_dir = _openclaw_sessions_dir(openclaw_agent_id).resolve()
+    try:
+        resolved = path.resolve()
+        if sessions_dir not in resolved.parents and resolved != sessions_dir:
+            return None
+        return resolved
+    except Exception:
+        return None
+
+
+def _extract_openclaw_content_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, list):
+        parts = [_extract_openclaw_content_text(item) for item in value]
+        return "\n".join(part for part in parts if part).strip()
+    if isinstance(value, dict):
+        if isinstance(value.get("text"), str):
+            return value["text"].strip()
+        if isinstance(value.get("content"), (str, list, dict)):
+            text = _extract_openclaw_content_text(value.get("content"))
+            if text:
+                return text
+        for key in ("transcriptText", "message", "value", "output"):
+            if isinstance(value.get(key), (str, list, dict)):
+                text = _extract_openclaw_content_text(value.get(key))
+                if text:
+                    return text
+    return ""
+
+
+def _latest_openclaw_assistant_snapshot(session_key: str, openclaw_agent_id: str) -> tuple[str, str]:
+    session_file = _resolve_openclaw_session_file(session_key, openclaw_agent_id)
+    if not session_file or not session_file.exists():
+        return "", ""
+
+    try:
+        with session_file.open("r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except Exception:
+        return "", ""
+
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(record, dict) or record.get("type") != "message":
+            continue
+        message = record.get("message")
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        text = _extract_openclaw_content_text(message.get("content")) or _extract_openclaw_content_text(message.get("text"))
+        if not text:
+            continue
+        try:
+            fingerprint = json.dumps(
+                {
+                    "id": record.get("id"),
+                    "timestamp": record.get("timestamp"),
+                    "message": message,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        except Exception:
+            fingerprint = text
+        return text, fingerprint
+    return "", ""
+
+
+def _openclaw_message_records(session_key: str, openclaw_agent_id: str) -> list[dict]:
+    session_file = _resolve_openclaw_session_file(session_key, openclaw_agent_id)
+    if not session_file or not session_file.exists():
+        return []
+
+    records = []
+    try:
+        with session_file.open("r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except Exception:
+        return []
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(record, dict) or record.get("type") != "message":
+            continue
+        message = record.get("message")
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        text = _extract_openclaw_content_text(message.get("content")) or _extract_openclaw_content_text(message.get("text"))
+        if not text:
+            continue
+        records.append({
+            "role": role,
+            "text": text,
+            "timestamp": record.get("timestamp") or message.get("timestamp") or datetime.now().isoformat(),
+        })
+    return records
+
+
+def _find_openclaw_user_submission_for_content(session_key: str, openclaw_agent_id: str, user_content: str) -> str | None:
+    needle = (user_content or "").strip()
+    if not needle:
+        return None
+
+    records = _openclaw_message_records(session_key, openclaw_agent_id)
+    for record in reversed(records):
+        if record.get("role") == "user" and needle in str(record.get("text") or ""):
+            return str(record.get("timestamp") or datetime.now().isoformat())
+    return None
+
+
+def _find_openclaw_reply_for_user_content(session_key: str, openclaw_agent_id: str, user_content: str) -> tuple[str, str] | None:
+    needle = (user_content or "").strip()
+    if not needle:
+        return None
+
+    records = _openclaw_message_records(session_key, openclaw_agent_id)
+    matching_indexes = [
+        index for index, record in enumerate(records)
+        if record.get("role") == "user" and needle in str(record.get("text") or "")
+    ]
+    for index in reversed(matching_indexes):
+        for record in records[index + 1:]:
+            role = record.get("role")
+            if role == "user":
+                break
+            if role == "assistant" and record.get("text"):
+                return str(record["text"]).strip(), str(record.get("timestamp") or datetime.now().isoformat())
+    return None
+
+
+def _wait_for_openclaw_assistant_reply(session_key: str, openclaw_agent_id: str, baseline_fingerprint: str, timeout_ms: int) -> str:
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    while time.monotonic() < deadline:
+        reply, fingerprint = _latest_openclaw_assistant_snapshot(session_key, openclaw_agent_id)
+        if reply and fingerprint != baseline_fingerprint:
+            return reply
+        time.sleep(0.5)
+    raise RuntimeError(f"OpenClaw 응답 시간이 초과되었습니다({max(1, timeout_ms // 1000)}초)")
+
+
+def _start_openclaw_agent_turn(agent_id: str, content: str) -> tuple[str, str, str, str]:
+    openclaw_agent_id = _resolve_openclaw_agent_id(agent_id)
+    if not openclaw_agent_id:
+        raise RuntimeError("이 캐릭터에 연결된 OpenClaw agent id가 없습니다")
+
+    session_key = _openclaw_session_key(agent_id, openclaw_agent_id)
+    _, baseline_fingerprint = _latest_openclaw_assistant_snapshot(session_key, openclaw_agent_id)
+    timeout_ms = OPENCLAW_CHAT_TIMEOUT_SECONDS * 1000
+    send_result = _openclaw_gateway_call(
+        "chat.send",
+        {
+            "sessionKey": session_key,
+            "message": content,
+            "deliver": False,
+            "timeoutMs": timeout_ms,
+            "idempotencyKey": str(uuid.uuid4()),
+        },
+        timeout_ms=OPENCLAW_CHAT_SEND_TIMEOUT_SECONDS * 1000,
+    )
+    run_id = str(send_result.get("runId") or "").strip()
+    if not run_id:
+        raise RuntimeError(f"OpenClaw Gateway가 runId를 반환하지 않았습니다: {send_result}")
+    return session_key, openclaw_agent_id, baseline_fingerprint, run_id
+
+
+def _run_openclaw_agent_turn(agent_id: str, content: str) -> tuple[str, str]:
+    session_key, openclaw_agent_id, baseline_fingerprint, _run_id = _start_openclaw_agent_turn(agent_id, content)
+
+    return _wait_for_openclaw_assistant_reply(
+        session_key,
+        openclaw_agent_id,
+        baseline_fingerprint,
+        OPENCLAW_CHAT_TIMEOUT_SECONDS * 1000,
+    ), openclaw_agent_id
+
+
+def _get_or_create_conversation(conn, agent_id: str, agent_name: str):
+    now_iso = datetime.now().isoformat()
+    row = conn.execute(
+        "SELECT id, agent_id, agent_name, created_at, updated_at FROM conversations WHERE agent_id = ?",
+        (agent_id,),
+    ).fetchone()
+    if row:
+        if agent_name and row["agent_name"] != agent_name:
+            conn.execute(
+                "UPDATE conversations SET agent_name = ?, updated_at = ? WHERE id = ?",
+                (agent_name, now_iso, row["id"]),
+            )
+            row = conn.execute(
+                "SELECT id, agent_id, agent_name, created_at, updated_at FROM conversations WHERE id = ?",
+                (row["id"],),
+            ).fetchone()
+        return row
+
+    cur = conn.execute(
+        "INSERT INTO conversations (agent_id, agent_name, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        (agent_id, agent_name, now_iso, now_iso),
+    )
+    return conn.execute(
+        "SELECT id, agent_id, agent_name, created_at, updated_at FROM conversations WHERE id = ?",
+        (cur.lastrowid,),
+    ).fetchone()
+
+
+def _insert_chat_message(conn, conversation_id: int, role: str, content: str, created_at: str | None = None):
+    now_iso = created_at or datetime.now().isoformat()
+    cur = conn.execute(
+        "INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+        (conversation_id, role, content, now_iso),
+    )
+    return conn.execute(
+        "SELECT id, role, content, created_at FROM messages WHERE id = ?",
+        (cur.lastrowid,),
+    ).fetchone()
+
+
+def _find_existing_agent_reply_for_user_message(conn, conversation_id: int, user_message_id: int):
+    rows = conn.execute(
+        """
+        SELECT id, role
+        FROM messages
+        WHERE conversation_id = ?
+          AND id > ?
+        ORDER BY id ASC
+        """,
+        (conversation_id, user_message_id),
+    ).fetchall()
+    for row in rows:
+        role = str(row["role"] or "").lower()
+        if role == "user":
+            return None
+        if role == "agent":
+            return row
+    return None
+
+
+def _expire_stale_chat_turns(conn):
+    now_iso = datetime.now().isoformat()
+    cutoff = (datetime.now() - timedelta(seconds=OPENCLAW_CHAT_TIMEOUT_SECONDS + 60)).isoformat()
+    conn.execute(
+        """
+        UPDATE chat_turns
+        SET status = 'error',
+            error_text = COALESCE(error_text, '응답 생성이 중단되었습니다. 다시 메시지를 보내주세요.'),
+            updated_at = ?
+        WHERE status = 'pending' AND created_at < ?
+        """,
+        (now_iso, cutoff),
+    )
+
+
+def _get_pending_chat_turn(conn, conversation_id: int):
+    _expire_stale_chat_turns(conn)
+    return conn.execute(
+        """
+        SELECT id, conversation_id, user_message_id, status, created_at, updated_at
+        FROM chat_turns
+        WHERE conversation_id = ? AND status = 'pending'
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (conversation_id,),
+    ).fetchone()
+
+
+def _insert_chat_turn(conn, conversation_id: int, user_message_id: int, created_at: str | None = None):
+    now_iso = created_at or datetime.now().isoformat()
+    cur = conn.execute(
+        """
+        INSERT INTO chat_turns (conversation_id, user_message_id, status, created_at, updated_at)
+        VALUES (?, ?, 'pending', ?, ?)
+        """,
+        (conversation_id, user_message_id, now_iso, now_iso),
+    )
+    return conn.execute(
+        """
+        SELECT id, conversation_id, user_message_id, status, created_at, updated_at
+        FROM chat_turns
+        WHERE id = ?
+        """,
+        (cur.lastrowid,),
+    ).fetchone()
+
+
+def _finish_chat_turn(conn, turn_id: int, status: str, openclaw_agent_id: str | None = None, reply_message_id: int | None = None, error_message_id: int | None = None, error_text: str | None = None):
+    now_iso = datetime.now().isoformat()
+    conn.execute(
+        """
+        UPDATE chat_turns
+        SET status = ?,
+            openclaw_agent_id = COALESCE(?, openclaw_agent_id),
+            reply_message_id = COALESCE(?, reply_message_id),
+            error_message_id = COALESCE(?, error_message_id),
+            error_text = COALESCE(?, error_text),
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (status, openclaw_agent_id, reply_message_id, error_message_id, error_text, now_iso, turn_id),
+    )
+
+
+def _mark_chat_turn_gateway_accepted(conn, turn_id: int, openclaw_agent_id: str | None = None, run_id: str | None = None, accepted_at: str | None = None):
+    now_iso = accepted_at or datetime.now().isoformat()
+    conn.execute(
+        """
+        UPDATE chat_turns
+        SET openclaw_agent_id = COALESCE(?, openclaw_agent_id),
+            gateway_run_id = COALESCE(?, gateway_run_id),
+            gateway_accepted_at = COALESCE(gateway_accepted_at, ?),
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (openclaw_agent_id, run_id, now_iso, now_iso, turn_id),
+    )
+
+
+def _recover_pending_chat_turns(conn, conversation_row):
+    agent_id = conversation_row["agent_id"]
+    agent_name = conversation_row["agent_name"]
+    openclaw_agent_id = _resolve_openclaw_agent_id(agent_id)
+    session_key = _openclaw_session_key(agent_id, openclaw_agent_id)
+    pending_turns = conn.execute(
+        """
+        SELECT id, conversation_id, user_message_id, status, error_message_id, created_at, gateway_accepted_at
+        FROM chat_turns
+        WHERE conversation_id = ?
+          AND (
+            status = 'pending'
+            OR (
+              status = 'error'
+              AND COALESCE(error_text, '') LIKE '%GatewayTransportError: gateway timeout%'
+            )
+          )
+        ORDER BY id ASC
+        """,
+        (conversation_row["id"],),
+    ).fetchall()
+
+    recovered = 0
+    for turn in pending_turns:
+        user_message = conn.execute(
+            "SELECT id, content, created_at FROM messages WHERE id = ?",
+            (turn["user_message_id"],),
+        ).fetchone()
+        if not user_message:
+            _finish_chat_turn(conn, turn["id"], "error", error_text="사용자 메시지를 찾지 못했습니다.")
+            continue
+
+        submitted_at = _find_openclaw_user_submission_for_content(session_key, openclaw_agent_id, user_message["content"])
+        if submitted_at:
+            _mark_chat_turn_gateway_accepted(
+                conn,
+                turn["id"],
+                openclaw_agent_id=openclaw_agent_id,
+                accepted_at=submitted_at,
+            )
+            if turn["status"] == "error":
+                if turn["error_message_id"]:
+                    conn.execute("DELETE FROM messages WHERE id = ?", (turn["error_message_id"],))
+                conn.execute(
+                    """
+                    UPDATE chat_turns
+                    SET status = 'pending',
+                        error_message_id = NULL,
+                        error_text = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (datetime.now().isoformat(), turn["id"]),
+                )
+
+        existing_reply = _find_existing_agent_reply_for_user_message(conn, conversation_row["id"], user_message["id"])
+        if existing_reply:
+            _finish_chat_turn(
+                conn,
+                turn["id"],
+                "done",
+                openclaw_agent_id=openclaw_agent_id,
+                reply_message_id=existing_reply["id"],
+            )
+            recovered += 1
+            continue
+
+        found = _find_openclaw_reply_for_user_content(session_key, openclaw_agent_id, user_message["content"])
+        if not found:
+            continue
+        reply_text, reply_created_at = found
+        if turn["error_message_id"]:
+            conn.execute("DELETE FROM messages WHERE id = ?", (turn["error_message_id"],))
+        reply_message = _insert_chat_message(conn, conversation_row["id"], "agent", reply_text, reply_created_at)
+        _finish_chat_turn(
+            conn,
+            turn["id"],
+            "done",
+            openclaw_agent_id=openclaw_agent_id,
+            reply_message_id=reply_message["id"],
+        )
+        conn.execute(
+            "UPDATE conversations SET agent_name = ?, updated_at = ? WHERE id = ?",
+            (agent_name, reply_message["created_at"], conversation_row["id"]),
+        )
+        recovered += 1
+    return recovered
+
+
+def _conversation_payload(row):
+    return {
+        "id": row["id"],
+        "agentId": row["agent_id"],
+        "agentName": row["agent_name"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def _message_payload(row):
+    return {
+        "id": row["id"],
+        "role": row["role"],
+        "content": row["content"],
+        "createdAt": row["created_at"],
+    }
+
+
+def _pending_message_payload(turn):
+    return {
+        "id": f"pending-{turn['id']}",
+        "role": "system",
+        "content": CHAT_WAITING_MESSAGE,
+        "createdAt": turn["created_at"],
+        "pending": True,
+        "turnId": turn["id"],
+    }
+
+
+def _conversation_messages_with_pending(conn, conversation_id: int, limit: int):
+    suppressed_error_rows = conn.execute(
+        """
+        SELECT error_message_id
+        FROM chat_turns
+        WHERE conversation_id = ?
+          AND error_message_id IS NOT NULL
+          AND COALESCE(error_text, '') LIKE '%GatewayTransportError: gateway timeout%'
+        """,
+        (conversation_id,),
+    ).fetchall()
+    suppressed_error_message_ids = {row["error_message_id"] for row in suppressed_error_rows}
+    rows = conn.execute(
+        """
+        SELECT id, role, content, created_at
+        FROM messages
+        WHERE conversation_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (conversation_id, limit),
+    ).fetchall()
+    messages = [
+        _message_payload(row)
+        for row in reversed(rows)
+        if row["id"] not in suppressed_error_message_ids
+    ]
+    turn_rows = conn.execute(
+        """
+        SELECT user_message_id, status, gateway_accepted_at, reply_message_id
+        FROM chat_turns
+        WHERE conversation_id = ?
+        """,
+        (conversation_id,),
+    ).fetchall()
+    turns_by_user_id = {row["user_message_id"]: row for row in turn_rows}
+    for index, message in enumerate(messages):
+        if str(message.get("role") or "").lower() != "user":
+            continue
+        turn = turns_by_user_id.get(message.get("id"))
+        if turn:
+            message["read"] = bool(turn["gateway_accepted_at"] or turn["reply_message_id"] or turn["status"] == "done")
+            continue
+        for next_message in messages[index + 1:]:
+            next_role = str(next_message.get("role") or "").lower()
+            if next_role == "agent":
+                message["read"] = True
+                break
+            if next_role == "user":
+                break
+    pending_turns = conn.execute(
+        """
+        SELECT id, user_message_id, created_at
+        FROM chat_turns
+        WHERE conversation_id = ? AND status = 'pending'
+        ORDER BY id ASC
+        """,
+        (conversation_id,),
+    ).fetchall()
+    if not pending_turns:
+        return messages, False
+
+    pending_by_user_id = {turn["user_message_id"]: turn for turn in pending_turns}
+    inserted = set()
+    with_pending = []
+    for message in messages:
+        with_pending.append(message)
+        turn = pending_by_user_id.get(message.get("id"))
+        if turn:
+            with_pending.append(_pending_message_payload(turn))
+            inserted.add(turn["id"])
+
+    for turn in pending_turns:
+        if turn["id"] not in inserted:
+            with_pending.append(_pending_message_payload(turn))
+
+    return with_pending, True
 
 
 def _ensure_home_favorites_index():
@@ -834,6 +1620,208 @@ if os.path.exists(RUNTIME_CONFIG_FILE):
     except Exception:
         pass
 
+init_chat_db()
+
+
+def _complete_chat_turn_background(turn_id: int, agent_id: str, agent_name: str, content: str):
+    try:
+        session_key, openclaw_agent_id, baseline_fingerprint, run_id = _start_openclaw_agent_turn(agent_id, content)
+        with chat_db_lock:
+            with _chat_db() as conn:
+                turn = conn.execute(
+                    "SELECT id, status FROM chat_turns WHERE id = ?",
+                    (turn_id,),
+                ).fetchone()
+                if not turn or turn["status"] != "pending":
+                    return
+                _mark_chat_turn_gateway_accepted(
+                    conn,
+                    turn_id,
+                    openclaw_agent_id=openclaw_agent_id,
+                    run_id=run_id,
+                )
+        reply_content = _wait_for_openclaw_assistant_reply(
+            session_key,
+            openclaw_agent_id,
+            baseline_fingerprint,
+            OPENCLAW_CHAT_TIMEOUT_SECONDS * 1000,
+        )
+    except Exception as e:
+        if "GatewayTransportError: gateway timeout" in str(e) or "gateway timeout" in str(e):
+            with chat_db_lock:
+                with _chat_db() as conn:
+                    conversation = _get_or_create_conversation(conn, agent_id, agent_name)
+                    _recover_pending_chat_turns(conn, conversation)
+            return
+        error_text = f"OpenClaw 대화 연결 실패: {e}"
+        with chat_db_lock:
+            with _chat_db() as conn:
+                turn = conn.execute(
+                    "SELECT id, conversation_id, user_message_id, status FROM chat_turns WHERE id = ?",
+                    (turn_id,),
+                ).fetchone()
+                if not turn or turn["status"] != "pending":
+                    return
+                conversation = _get_or_create_conversation(conn, agent_id, agent_name)
+                error_message = _insert_chat_message(conn, conversation["id"], "system", error_text)
+                _finish_chat_turn(
+                    conn,
+                    turn_id,
+                    "error",
+                    error_message_id=error_message["id"],
+                    error_text=error_text,
+                )
+                conn.execute(
+                    "UPDATE conversations SET agent_name = ?, updated_at = ? WHERE id = ?",
+                    (agent_name, error_message["created_at"], conversation["id"]),
+                )
+        return
+
+    with chat_db_lock:
+        with _chat_db() as conn:
+            turn = conn.execute(
+                "SELECT id, conversation_id, user_message_id, status FROM chat_turns WHERE id = ?",
+                (turn_id,),
+            ).fetchone()
+            if not turn or turn["status"] != "pending":
+                return
+            conversation = _get_or_create_conversation(conn, agent_id, agent_name)
+            existing_reply = _find_existing_agent_reply_for_user_message(conn, conversation["id"], turn["user_message_id"])
+            if existing_reply:
+                _finish_chat_turn(
+                    conn,
+                    turn_id,
+                    "done",
+                    openclaw_agent_id=openclaw_agent_id,
+                    reply_message_id=existing_reply["id"],
+                )
+                return
+            reply_message = _insert_chat_message(conn, conversation["id"], "agent", reply_content)
+            _finish_chat_turn(
+                conn,
+                turn_id,
+                "done",
+                openclaw_agent_id=openclaw_agent_id,
+                reply_message_id=reply_message["id"],
+            )
+            conn.execute(
+                "UPDATE conversations SET agent_name = ?, updated_at = ? WHERE id = ?",
+                (agent_name, reply_message["created_at"], conversation["id"]),
+            )
+
+
+@app.route("/chat/conversation", methods=["GET"])
+def get_chat_conversation():
+    """Get or create an agent conversation and return recent messages."""
+    try:
+        agent_id = _normalize_chat_agent_id(request.args.get("agentId", ""))
+        agent_name = _normalize_chat_agent_name(request.args.get("agentName", ""), agent_id)
+        limit = min(500, max(1, int(request.args.get("limit", "200"))))
+
+        with chat_db_lock:
+            with _chat_db() as conn:
+                conversation = _get_or_create_conversation(conn, agent_id, agent_name)
+                _recover_pending_chat_turns(conn, conversation)
+                _expire_stale_chat_turns(conn)
+                conversation = _get_or_create_conversation(conn, agent_id, agent_name)
+                messages, pending = _conversation_messages_with_pending(conn, conversation["id"], limit)
+
+        return jsonify({
+            "ok": True,
+            "conversation": _conversation_payload(conversation),
+            "messages": messages,
+            "pending": pending,
+        })
+    except ValueError as e:
+        return jsonify({"ok": False, "msg": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@app.route("/chat/messages", methods=["POST"])
+def create_chat_message():
+    """Append a user message, call the character-linked OpenClaw agent, and store the reply."""
+    try:
+        data = request.get_json()
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "msg": "invalid json"}), 400
+
+        agent_id = _normalize_chat_agent_id(data.get("agentId", ""))
+        agent_name = _normalize_chat_agent_name(data.get("agentName", ""), agent_id)
+        role = (data.get("role") or "user").strip().lower()
+        content = (data.get("content") or "").strip()
+
+        if role not in {"user", "agent", "system"}:
+            return jsonify({"ok": False, "msg": "role은 user/agent/system 중 하나여야 합니다"}), 400
+        if not content:
+            return jsonify({"ok": False, "msg": "메시지를 입력해주세요"}), 400
+        if len(content) > 8000:
+            return jsonify({"ok": False, "msg": "메시지가 너무 깁니다"}), 400
+
+        now_iso = datetime.now().isoformat()
+        turn_id = None
+        with chat_db_lock:
+            with _chat_db() as conn:
+                conversation = _get_or_create_conversation(conn, agent_id, agent_name)
+                if role == "user":
+                    _recover_pending_chat_turns(conn, conversation)
+                if role == "user":
+                    pending_turn = _get_pending_chat_turn(conn, conversation["id"])
+                    if pending_turn:
+                        messages, _ = _conversation_messages_with_pending(conn, conversation["id"], 200)
+                        return jsonify({
+                            "ok": False,
+                            "msg": "이미 응답을 기다리는 중입니다. 응답이 완료된 뒤 다시 보내주세요.",
+                            "pending": True,
+                            "messages": messages,
+                            "conversation": {
+                                **_conversation_payload(conversation),
+                                "agentName": agent_name,
+                            },
+                        }), 409
+                message = _insert_chat_message(conn, conversation["id"], role, content, now_iso)
+                if role == "user":
+                    turn = _insert_chat_turn(conn, conversation["id"], message["id"], now_iso)
+                    turn_id = turn["id"]
+                conn.execute(
+                    "UPDATE conversations SET agent_name = ?, updated_at = ? WHERE id = ?",
+                    (agent_name, now_iso, conversation["id"]),
+                )
+
+        if role != "user":
+            return jsonify({
+                "ok": True,
+                "message": _message_payload(message),
+                "conversation": {
+                    **_conversation_payload(conversation),
+                    "agentName": agent_name,
+                    "updatedAt": now_iso,
+                },
+            })
+
+        threading.Thread(
+            target=_complete_chat_turn_background,
+            args=(turn_id, agent_id, agent_name, content),
+            daemon=True,
+            name=f"chat-turn-{turn_id}",
+        ).start()
+
+        return jsonify({
+            "ok": True,
+            "message": _message_payload(message),
+            "pending": True,
+            "messages": [_message_payload(message), _pending_message_payload({"id": turn_id, "created_at": now_iso})],
+            "conversation": {
+                **_conversation_payload(conversation),
+                "agentName": agent_name,
+                "updatedAt": now_iso,
+            },
+        })
+    except ValueError as e:
+        return jsonify({"ok": False, "msg": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
 
 @app.route("/agents", methods=["GET"])
 def get_agents():
@@ -962,6 +1950,12 @@ def join_agent():
         state = data.get("state", "idle")
         detail = data.get("detail", "")
         join_key = data.get("joinKey", "").strip()
+        openclaw_agent_id = (
+            data.get("openclawAgentId")
+            or data.get("openclaw_agent_id")
+            or data.get("openclawAgent")
+            or ""
+        ).strip()
 
         # Normalize state early for compatibility
         state = normalize_agent_state(state)
@@ -1028,6 +2022,8 @@ def join_agent():
                 existing["area"] = state_to_area(state)
                 existing["source"] = "remote-openclaw"
                 existing["joinKey"] = join_key
+                if openclaw_agent_id:
+                    existing["openclawAgentId"] = openclaw_agent_id
                 existing["authStatus"] = "approved"
                 existing["authApprovedAt"] = datetime.now().isoformat()
                 existing["authExpiresAt"] = (datetime.now() + timedelta(hours=24)).isoformat()
@@ -1041,7 +2037,7 @@ def join_agent():
                 import random
                 import string
                 agent_id = "agent_" + str(int(datetime.now().timestamp() * 1000)) + "_" + "".join(random.choices(string.ascii_lowercase + string.digits, k=4))
-                agents.append({
+                new_agent = {
                     "agentId": agent_id,
                     "name": name,
                     "isMain": False,
@@ -1056,7 +2052,10 @@ def join_agent():
                     "authExpiresAt": (datetime.now() + timedelta(hours=24)).isoformat(),
                     "lastPushAt": datetime.now().isoformat(),
                     "avatar": random.choice(["guest_role_1", "guest_role_2", "guest_role_3", "guest_role_4", "guest_role_5", "guest_role_6"])
-                })
+                }
+                if openclaw_agent_id:
+                    new_agent["openclawAgentId"] = openclaw_agent_id
+                agents.append(new_agent)
 
             key_item["used"] = True
             key_item["usedBy"] = name
@@ -1154,6 +2153,12 @@ def agent_push():
         state = (data.get("state") or "").strip()
         detail = (data.get("detail") or "").strip()
         name = (data.get("name") or "").strip()
+        openclaw_agent_id = (
+            data.get("openclawAgentId")
+            or data.get("openclaw_agent_id")
+            or data.get("openclawAgent")
+            or ""
+        ).strip()
 
         if not agent_id or not join_key or not state:
             return jsonify({"ok": False, "msg": "agentId/joinKey/state가 없습니다"}), 400
@@ -1191,6 +2196,7 @@ def agent_push():
             target["area"] = state_to_area(state)
             target["source"] = "remote-openclaw"
             target["joinKey"] = join_key
+            target["openclawAgentId"] = openclaw_agent_id or _resolve_openclaw_agent_id("star")
             target["authStatus"] = "approved"
             target["authApprovedAt"] = target.get("authApprovedAt") or now_iso
             target["authExpiresAt"] = None
@@ -1238,6 +2244,8 @@ def agent_push():
         target["updated_at"] = datetime.now().isoformat()
         target["area"] = state_to_area(state)
         target["source"] = "remote-openclaw"
+        if openclaw_agent_id:
+            target["openclawAgentId"] = openclaw_agent_id
         target["lastPushAt"] = datetime.now().isoformat()
 
         save_agents_state(agents)

@@ -1,6 +1,7 @@
 .git
 .codex
 .openclaw
+.runtime
 .venv
 __pycache__
 *.pyc
@@ -18,6 +19,9 @@ agents-state.json
 join-keys.json
 office-agent-state.json
 runtime-config.json
+chat.db
+*.db-shm
+*.db-wal
 memory/
 
 # Mutable/generated assets should stay on the host volume.

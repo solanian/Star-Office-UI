@@ -132,6 +132,27 @@
             font-size: 12px;
             line-height: 1.4;
         }
+        .agent-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+        }
+        .agent-action-btn {
+            height: 30px;
+            padding: 0 10px;
+            border: 1px solid #475569;
+            background: #111827;
+            color: #f8fafc;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: 'ArkPixel', 'Courier New', monospace;
+            font-size: 13px;
+        }
+        .agent-action-btn:hover {
+            border-color: #ffd166;
+            background: #263047;
+        }
         .agent-pill {
             border: 1px solid #334155;
             background: #0f172a;
@@ -190,7 +211,7 @@
         }
         .character-menu {
             position: absolute;
-            z-index: 4000;
+            z-index: 6500;
             min-width: 96px;
             display: grid;
             gap: 4px;
@@ -199,6 +220,7 @@
             border: 2px solid #334155;
             box-shadow: 0 10px 24px rgba(0,0,0,0.35);
             pointer-events: auto;
+            user-select: none;
         }
         .character-menu[hidden] {
             display: none !important;
@@ -221,10 +243,215 @@
             font-size: 13px;
             cursor: pointer;
             text-align: left;
+            position: relative;
+            z-index: 1;
+            pointer-events: auto;
         }
         .character-menu button:hover {
             background: #334155;
             border-color: #ffd166;
+        }
+        #page-stack {
+            position: fixed;
+            inset: 0;
+            z-index: 7000;
+            background: #101421;
+            color: #f8fafc;
+            font-family: 'ArkPixel', 'Courier New', monospace;
+        }
+        #page-stack[hidden] {
+            display: none !important;
+        }
+        .stack-page {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            min-height: 0;
+        }
+        .stack-page[hidden] {
+            display: none !important;
+        }
+        .chat-header {
+            height: 52px;
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-bottom: 2px solid #263047;
+            background: #151b2b;
+        }
+        .chat-back-btn {
+            width: 38px;
+            height: 34px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #334155;
+            background: #0f172a;
+            color: #f8fafc;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 18px;
+            line-height: 1;
+        }
+        .chat-back-btn:hover {
+            border-color: #ffd166;
+            background: #1f2937;
+        }
+        .chat-title {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 16px;
+            line-height: 1.2;
+            color: #ffd166;
+        }
+        .chat-messages {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: #0f1422;
+        }
+        .chat-empty,
+        .chat-error {
+            color: #94a3b8;
+            text-align: center;
+            padding: 28px 8px;
+            font-size: 13px;
+        }
+        .chat-error {
+            color: #fca5a5;
+            align-self: flex-start;
+            max-width: min(760px, 92%);
+            text-align: left;
+        }
+        .chat-message {
+            max-width: min(720px, 86%);
+            display: grid;
+            gap: 4px;
+            padding: 9px 10px;
+            border: 1px solid #334155;
+            background: #172033;
+            border-radius: 6px;
+            align-self: flex-start;
+        }
+        .chat-message-user {
+            align-self: flex-end;
+            max-width: min(660px, 100%);
+            background: #1f2a19;
+            border-color: #556b2f;
+        }
+        .chat-user-line {
+            align-self: flex-end;
+            display: flex;
+            align-items: flex-end;
+            justify-content: flex-end;
+            gap: 7px;
+            max-width: min(720px, 92%);
+        }
+        .chat-user-line .chat-message-user {
+            align-self: auto;
+            min-width: 0;
+        }
+        .chat-message-system {
+            align-self: center;
+            max-width: min(680px, 92%);
+            background: #1e293b;
+            border-color: #475569;
+        }
+        .chat-status-text {
+            align-self: center;
+            max-width: min(680px, 92%);
+            padding: 2px 8px;
+            color: #94a3b8;
+            font-size: 12px;
+            line-height: 1.45;
+            text-align: center;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .chat-status-error {
+            align-self: flex-start;
+            max-width: min(760px, 92%);
+            color: #f87171;
+            text-align: left;
+        }
+        .chat-status-waiting {
+            color: #cbd5e1;
+        }
+        .chat-message-meta {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            justify-content: space-between;
+            color: #94a3b8;
+            font-size: 11px;
+            line-height: 1.2;
+        }
+        .chat-message-body {
+            color: #f8fafc;
+            font-size: 14px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .chat-read-receipt {
+            flex: 0 0 auto;
+            padding-bottom: 4px;
+            color: #8b949e;
+            font-size: 11px;
+            line-height: 1;
+            white-space: nowrap;
+        }
+        .chat-read-receipt-read {
+            color: #f8fafc;
+        }
+        .chat-composer {
+            flex: 0 0 auto;
+            display: flex;
+            gap: 8px;
+            padding: 10px;
+            border-top: 2px solid #263047;
+            background: #151b2b;
+        }
+        .chat-composer textarea {
+            flex: 1 1 auto;
+            min-width: 0;
+            height: 44px;
+            max-height: 120px;
+            resize: vertical;
+            padding: 9px 10px;
+            border: 2px solid #334155;
+            background: #0f172a;
+            color: #f8fafc;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 14px;
+            line-height: 1.35;
+        }
+        .chat-composer button {
+            flex: 0 0 auto;
+            width: 76px;
+            border: 2px solid #f59e0b;
+            background: #ffd166;
+            color: #22170a;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        .chat-composer button:disabled {
+            opacity: .55;
+            cursor: wait;
         }
         #game-container canvas {
             width: 1280px !important;
@@ -1346,8 +1573,8 @@
     </div>
 
     <nav class="office-tabs" role="tablist" aria-label="Star Office views">
-        <button id="tab-agents" class="office-tab-btn" type="button" role="tab" aria-selected="false" aria-controls="agents-view" onclick="switchOfficeTab('agents')">agents</button>
         <button id="tab-office" class="office-tab-btn active" type="button" role="tab" aria-selected="true" aria-controls="main-stage" onclick="switchOfficeTab('office')">office</button>
+        <button id="tab-agents" class="office-tab-btn" type="button" role="tab" aria-selected="false" aria-controls="agents-view" onclick="switchOfficeTab('agents')">agents</button>
     </nav>
 
     <section id="agents-view" class="tab-view" role="tabpanel" aria-labelledby="tab-agents" hidden>
@@ -1366,6 +1593,22 @@
                 <button type="button" data-action="info">정보</button>
             </div>
         </div>
+    </div>
+
+    <div id="page-stack" hidden>
+        <section id="chat-page" class="stack-page" hidden aria-label="agent chat">
+            <header class="chat-header">
+                <button id="chat-back-btn" class="chat-back-btn" type="button" title="뒤로가기" aria-label="뒤로가기">←</button>
+                <div id="chat-title" class="chat-title">Agent</div>
+            </header>
+            <div id="chat-messages" class="chat-messages">
+                <div class="chat-empty">대화를 불러오는 중...</div>
+            </div>
+            <form id="chat-composer" class="chat-composer">
+                <textarea id="chat-input" placeholder="메시지를 입력하세요" rows="1"></textarea>
+                <button id="chat-send-btn" type="button">전송</button>
+            </form>
+        </section>
     </div>
     
     <div id="asset-highlight"></div>
@@ -1496,7 +1739,7 @@
                 assetHintDefault: '공통 소재: 원본 크기, 투명 영역, 시각 중심을 최대한 유지해야 위치 어긋남과 왜곡을 줄일 수 있습니다.',
                 memoTitle: '어제의 메모', guestTitle: '방문자 목록',
                 loadingOffice: '사무실에 가구를 배치하는 중...',
-                loadingOfficeLate: '에이전트들을 데려오는 중...'
+                loadingOfficeLate: '에이전트들이 출근하는 중...'
             },
             zh: {
                 controlTitle: 'Star 状态',
@@ -1591,7 +1834,7 @@
             const safePercent = Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(percent))) : null;
             const dict = I18N[uiLang] || {};
             const base = safePercent !== null && safePercent > 50
-                ? (dict.loadingOfficeLate || '에이전트들을 데려오는 중...')
+                ? (dict.loadingOfficeLate || '에이전트들이 출근하는 중...')
                 : (dict.loadingOffice || '사무실에 가구를 배치하는 중...');
             const p = safePercent !== null ? ` ${safePercent}%` : '';
             loadingEl.textContent = `${base}${p}`;
@@ -1959,6 +2202,17 @@
             if (menu) menu.hidden = true;
         }
 
+        function isPointerInsideCharacterMenu(source) {
+            const menu = document.getElementById('character-menu');
+            if (!menu || menu.hidden) return false;
+            const event = source && source.event ? source.event : source;
+            const clientX = Number(event && event.clientX);
+            const clientY = Number(event && event.clientY);
+            if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
+            const rect = menu.getBoundingClientRect();
+            return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+        }
+
         function getOfficeCanvasEl() {
             return game?.sys?.game?.canvas || game?.canvas || document.querySelector('#game-container canvas');
         }
@@ -2014,20 +2268,395 @@
                 sprite.setInteractive({ useHandCursor: true });
             } catch (e) {}
             sprite.on('pointerdown', (pointer, localX, localY, event) => {
+                if (isPointerInsideCharacterMenu(pointer) || isPointerInsideCharacterMenu(event)) return;
                 if (event && event.stopPropagation) event.stopPropagation();
                 showCharacterMenu(sprite, typeof metaFactory === 'function' ? metaFactory() : {}, pointer);
             });
         }
 
+        const pageStack = [];
+        let activeChat = null;
+        let chatWaitingTimer = null;
+        let chatWaitingTick = 0;
+        let chatPendingPollTimer = null;
+        let chatPendingPollInFlight = false;
+        let chatSubmitInFlight = false;
+        let chatConversationPending = false;
+
+        function showStackPage(pageId) {
+            const stack = document.getElementById('page-stack');
+            if (stack) stack.hidden = false;
+            document.querySelectorAll('.stack-page').forEach((page) => {
+                page.hidden = page.id !== pageId;
+            });
+        }
+
+        function pushStackPage(pageId, state = {}) {
+            pageStack.push({ pageId, state });
+            showStackPage(pageId);
+        }
+
+        function popStackPage() {
+            if (!pageStack.length) return;
+            pageStack.pop();
+            if (!pageStack.length) {
+                const stack = document.getElementById('page-stack');
+                if (stack) stack.hidden = true;
+                document.querySelectorAll('.stack-page').forEach((page) => { page.hidden = true; });
+                activeChat = null;
+                stopChatWaitingStatus();
+                stopChatPendingPoll();
+                chatConversationPending = false;
+                updateChatComposerState();
+                return;
+            }
+            const previous = pageStack[pageStack.length - 1];
+            showStackPage(previous.pageId);
+        }
+
+        function formatChatTime(value) {
+            if (!value) return '';
+            try {
+                const d = new Date(value);
+                if (Number.isNaN(d.getTime())) return '';
+                return d.toLocaleString('ko-KR', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function formatChatWaitingText(tick = 0) {
+            return `응답을 기다리는 중${'.'.repeat((Math.abs(tick) % 3) + 1)}`;
+        }
+
+        function isChatWaitingText(content) {
+            const text = String(content || '').trim();
+            return /^OpenClaw 응답을 기다리는 중/.test(text) || /^응답을 기다리는 중/.test(text);
+        }
+
+        function updateChatWaitingText() {
+            const text = formatChatWaitingText(chatWaitingTick);
+            document.querySelectorAll('[data-chat-waiting-status]').forEach((el) => {
+                el.textContent = text;
+            });
+            chatWaitingTick += 1;
+        }
+
+        function startChatWaitingStatus() {
+            stopChatWaitingStatus();
+            chatWaitingTick = 0;
+            updateChatWaitingText();
+            chatWaitingTimer = window.setInterval(updateChatWaitingText, 550);
+        }
+
+        function stopChatWaitingStatus() {
+            if (chatWaitingTimer) {
+                window.clearInterval(chatWaitingTimer);
+                chatWaitingTimer = null;
+            }
+        }
+
+        function isChatPageVisible() {
+            const stack = document.getElementById('page-stack');
+            const page = document.getElementById('chat-page');
+            return !!(stack && page && !stack.hidden && !page.hidden);
+        }
+
+        function updateChatComposerState() {
+            const button = document.getElementById('chat-send-btn');
+            const isBusy = chatSubmitInFlight || chatConversationPending;
+            if (button) {
+                button.disabled = isBusy;
+                button.textContent = isBusy ? '대기' : '전송';
+            }
+        }
+
+        function hasChatWaitingMessages(messages) {
+            return Array.isArray(messages) && messages.some((message) => (
+                (message?.role || '').toLowerCase() === 'system' && isChatWaitingText(message?.content)
+            ));
+        }
+
+        function hasRenderedChatWaitingStatus() {
+            return !!document.querySelector('[data-chat-waiting-status]');
+        }
+
+        function stopChatPendingPoll() {
+            if (chatPendingPollTimer) {
+                window.clearInterval(chatPendingPollTimer);
+                chatPendingPollTimer = null;
+            }
+            chatPendingPollInFlight = false;
+        }
+
+        function startChatPendingPoll() {
+            if (chatPendingPollTimer || !isChatPageVisible()) return;
+            chatPendingPollTimer = window.setInterval(async () => {
+                if (chatPendingPollInFlight || !isChatPageVisible()) return;
+                chatPendingPollInFlight = true;
+                try {
+                    await loadChatConversation({ showLoading: false, preservePendingRender: true });
+                } finally {
+                    chatPendingPollInFlight = false;
+                }
+            }, 1600);
+        }
+
+        function setChatConversationPending(isPending) {
+            const nextPending = !!isPending;
+            const wasPending = chatConversationPending;
+            chatConversationPending = nextPending;
+            if (chatConversationPending) {
+                if (!wasPending || !chatWaitingTimer) startChatWaitingStatus();
+                startChatPendingPoll();
+            } else {
+                stopChatWaitingStatus();
+                stopChatPendingPoll();
+            }
+            updateChatComposerState();
+        }
+
+        function hasAgentReplyAfter(messages, index) {
+            if (!Array.isArray(messages)) return false;
+            for (let i = index + 1; i < messages.length; i += 1) {
+                const role = (messages[i]?.role || '').toLowerCase();
+                if (role === 'agent') return true;
+                if (role === 'user') return false;
+            }
+            return false;
+        }
+
+        function isChatErrorText(content) {
+            const text = String(content || '').trim();
+            if (!text) return false;
+            return /연결\s*실패|호출\s*실패|실행\s*실패|GatewayTransportError|Unauthorized|timeout|error/i.test(text);
+        }
+
+        function renderChatMessage(message, options = {}) {
+            const agentName = activeChat?.agentName || 'Agent';
+            const role = (message.role || 'user').toLowerCase();
+            if (role === 'system') {
+                if (isChatWaitingText(message.content)) {
+                    return `<div class="chat-status-text chat-status-waiting" data-chat-waiting-status>${escapeHtml(formatChatWaitingText(0))}</div>`;
+                }
+                const errorClass = isChatErrorText(message.content) ? ' chat-status-error' : '';
+                return `<div class="chat-status-text${errorClass}">${escapeHtml(message.content || '')}</div>`;
+            }
+            const label = role === 'user' ? '나' : role === 'agent' ? agentName : '시스템';
+            const roleClass = role === 'user' ? ' chat-message-user' : '';
+            const readReceipt = role === 'user'
+                ? `<span class="chat-read-receipt${options.read ? ' chat-read-receipt-read' : ''}">${options.read ? '읽음' : '안읽음'}</span>`
+                : '';
+            const bubble = `
+                <article class="chat-message${roleClass}">
+                    <div class="chat-message-meta">
+                        <span>${escapeHtml(label)}</span>
+                        <span>${escapeHtml(formatChatTime(message.createdAt))}</span>
+                    </div>
+                    <div class="chat-message-body">${escapeHtml(message.content || '')}</div>
+                </article>
+            `;
+            if (role === 'user') {
+                return `<div class="chat-user-line">${readReceipt}${bubble}</div>`;
+            }
+            return `
+                <article class="chat-message${roleClass}">
+                    <div class="chat-message-meta">
+                        <span>${escapeHtml(label)}</span>
+                        <span>${escapeHtml(formatChatTime(message.createdAt))}</span>
+                    </div>
+                    <div class="chat-message-body">${escapeHtml(message.content || '')}</div>
+                </article>
+            `;
+        }
+
+        function renderChatMessages(messages) {
+            const box = document.getElementById('chat-messages');
+            if (!box) return false;
+            if (!Array.isArray(messages) || messages.length === 0) {
+                box.innerHTML = '<div class="chat-empty">아직 대화가 없습니다</div>';
+                return false;
+            }
+            box.innerHTML = messages.map((message, index) => {
+                const isUser = (message.role || '').toLowerCase() === 'user';
+                const read = isUser && (typeof message.read === 'boolean' ? message.read : hasAgentReplyAfter(messages, index));
+                return renderChatMessage(message, { read });
+            }).join('');
+            box.scrollTop = box.scrollHeight;
+            return hasChatWaitingMessages(messages);
+        }
+
+        function renderChatError(message) {
+            const box = document.getElementById('chat-messages');
+            if (box) box.innerHTML = `<div class="chat-error">${escapeHtml(message || '대화를 불러오지 못했습니다')}</div>`;
+        }
+
+        async function loadChatConversation(options = {}) {
+            const showLoading = options.showLoading !== false;
+            if (!isChatPageVisible()) return;
+            const chat = getActiveChatState();
+            if (!chat) return;
+            const box = document.getElementById('chat-messages');
+            if (box && showLoading) box.innerHTML = '<div class="chat-empty">대화를 불러오는 중...</div>';
+            const params = new URLSearchParams({
+                agentId: chat.agentId,
+                agentName: chat.agentName,
+                limit: '200'
+            });
+            try {
+                const response = await fetch('/chat/conversation?' + params.toString(), { cache: 'no-store' });
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.msg || '대화를 불러오지 못했습니다');
+                const messages = data.messages || [];
+                const hasWaiting = hasChatWaitingMessages(messages);
+                if (!(options.preservePendingRender && hasWaiting && hasRenderedChatWaitingStatus())) {
+                    renderChatMessages(messages);
+                }
+                setChatConversationPending(!!data.pending || hasWaiting);
+            } catch (e) {
+                setChatConversationPending(false);
+                renderChatError(e.message || String(e));
+            }
+        }
+
+        function openAgentChatPage(agentId, agentName) {
+            const normalizedAgentId = String(agentId || '').trim();
+            const normalizedAgentName = String(agentName || normalizedAgentId || 'Agent').trim();
+            if (!normalizedAgentId) {
+                if (statusText) statusText.textContent = '대화할 agentId가 없습니다';
+                return;
+            }
+            hideCharacterMenu();
+            stopChatPendingPoll();
+            stopChatWaitingStatus();
+            chatConversationPending = false;
+            chatSubmitInFlight = false;
+            activeChat = { agentId: normalizedAgentId, agentName: normalizedAgentName };
+            const page = document.getElementById('chat-page');
+            if (page) {
+                page.dataset.agentId = normalizedAgentId;
+                page.dataset.agentName = normalizedAgentName;
+            }
+            const title = document.getElementById('chat-title');
+            if (title) title.textContent = normalizedAgentName;
+            const input = document.getElementById('chat-input');
+            if (input) input.value = '';
+            updateChatComposerState();
+            pushStackPage('chat-page', activeChat);
+            loadChatConversation();
+            setTimeout(() => input?.focus(), 0);
+        }
+
+        function getActiveChatState() {
+            if (activeChat?.agentId) return activeChat;
+            const page = document.getElementById('chat-page');
+            const agentId = String(page?.dataset?.agentId || '').trim();
+            if (!agentId) return null;
+            const agentName = String(page?.dataset?.agentName || agentId).trim();
+            activeChat = { agentId, agentName };
+            return activeChat;
+        }
+
+	        async function submitChatMessage(event) {
+	            if (event && typeof event.preventDefault === 'function') event.preventDefault();
+	            const chat = getActiveChatState();
+	            if (!chat) {
+	                if (statusText) statusText.textContent = '대화할 agentId가 없습니다';
+	                return;
+	            }
+	            const input = document.getElementById('chat-input');
+	            const button = document.getElementById('chat-send-btn');
+	            const content = (input?.value || '').trim();
+	            if (!content) return;
+	            if (button?.disabled) return;
+	            if (chatSubmitInFlight || chatConversationPending) return;
+
+	            const box = document.getElementById('chat-messages');
+	            if (input) input.value = '';
+	            if (box) {
+	                const now = new Date().toISOString();
+	                const pending = [
+	                    { role: 'user', content, createdAt: now },
+	                    { role: 'system', content: formatChatWaitingText(0), createdAt: now }
+	                ];
+	                const hasOnlyEmpty = !!box.querySelector('.chat-empty');
+	                if (hasOnlyEmpty) {
+	                    renderChatMessages(pending);
+	                } else {
+	                    box.insertAdjacentHTML('beforeend', pending.map((message) => (
+	                        renderChatMessage(message, { read: false })
+	                    )).join(''));
+	                    box.scrollTop = box.scrollHeight;
+	                }
+	            }
+	            chatSubmitInFlight = true;
+	            setChatConversationPending(true);
+	            try {
+	                const response = await fetch('/chat/messages', {
+	                    method: 'POST',
+	                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        agentId: chat.agentId,
+                        agentName: chat.agentName,
+                        role: 'user',
+	                        content
+	                    })
+	                });
+	                const data = await response.json();
+	                if (!response.ok || !data.ok) throw new Error(data.msg || '메시지를 저장하지 못했습니다');
+	                await loadChatConversation();
+	            } catch (e) {
+	                await loadChatConversation();
+	                if (statusText) statusText.textContent = e.message || String(e);
+	            } finally {
+	                chatSubmitInFlight = false;
+	                updateChatComposerState();
+	                input?.focus();
+	            }
+	        }
+
         document.addEventListener('DOMContentLoaded', () => {
             const menu = document.getElementById('character-menu');
+            const chatBackBtn = document.getElementById('chat-back-btn');
+            const chatComposer = document.getElementById('chat-composer');
+            const chatSendBtn = document.getElementById('chat-send-btn');
+            const chatInput = document.getElementById('chat-input');
+            const agentsList = document.getElementById('agents-card-list');
+            if (chatBackBtn) chatBackBtn.addEventListener('click', popStackPage);
+            if (chatComposer) chatComposer.addEventListener('submit', submitChatMessage);
+            if (chatSendBtn) chatSendBtn.addEventListener('click', submitChatMessage);
+            if (chatInput) {
+                chatInput.addEventListener('keydown', (event) => {
+                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                        submitChatMessage(event);
+                    }
+                });
+            }
+            if (agentsList) {
+                agentsList.addEventListener('click', (event) => {
+                    const button = event.target.closest('button[data-agent-action]');
+                    if (!button) return;
+                    const action = button.dataset.agentAction;
+                    const agentId = button.dataset.agentId || '';
+                    const name = button.dataset.agentName || 'Agent';
+                    if (action === 'chat') {
+                        openAgentChatPage(agentId, name);
+                        return;
+                    }
+                    if (statusText) statusText.textContent = `[${name}] 정보`;
+                });
+            }
             if (!menu) return;
-            menu.addEventListener('pointerdown', (event) => {
-                event.stopPropagation();
+            ['pointerdown', 'mousedown', 'mouseup', 'click', 'touchstart'].forEach((type) => {
+                menu.addEventListener(type, (event) => {
+                    event.__starOfficePanHandled = true;
+                    event.stopPropagation();
+                });
             });
             document.addEventListener('pointerdown', (event) => {
                 if (menu.hidden) return;
                 if (event.target && event.target.closest && event.target.closest('#character-menu')) return;
+                if (event.target && event.target.closest && event.target.closest('#page-stack')) return;
                 if (window.__characterMenuJustOpened) return;
                 hideCharacterMenu();
             }, true);
@@ -2035,9 +2664,14 @@
                 const button = event.target.closest('button[data-action]');
                 if (!button) return;
                 event.stopPropagation();
+                const action = button.dataset.action;
+                const agentId = menu.dataset.agentId || '';
                 const name = menu.dataset.agentName || 'Star';
-                const actionText = button.dataset.action === 'chat' ? '대화' : '정보';
-                if (statusText) statusText.textContent = `[${name}] ${actionText}`;
+                if (action === 'chat') {
+                    openAgentChatPage(agentId, name);
+                    return;
+                }
+                if (statusText) statusText.textContent = `[${name}] 정보`;
             });
         });
 
@@ -2138,7 +2772,10 @@
 
             list.innerHTML = agents.map((agent) => {
                 const isMain = !!agent.isMain;
-                const name = escapeHtml(agent.name || (isMain ? 'Star' : '이름 없는 agent'));
+                const agentIdRaw = String(agent.agentId || (isMain ? 'star' : '')).trim();
+                const nameRaw = agent.name || (isMain ? 'Star' : '이름 없는 agent');
+                const name = escapeHtml(nameRaw);
+                const agentId = escapeHtml(agentIdRaw);
                 const state = escapeHtml(stateMap[agent.state] || agent.state || '대기');
                 const auth = escapeHtml(authMap[agent.authStatus] || agent.authStatus || '승인됨');
                 const area = escapeHtml(agent.area || '-');
@@ -2161,6 +2798,10 @@
                                 <span class="agent-pill">${source}</span>
                                 <span class="agent-pill">${updated}</span>
                                 ${detail ? `<div class="agent-detail">${detail}</div>` : ''}
+                            </div>
+                            <div class="agent-actions">
+                                <button class="agent-action-btn" type="button" data-agent-action="chat" data-agent-id="${agentId}" data-agent-name="${name}">대화</button>
+                                <button class="agent-action-btn" type="button" data-agent-action="info" data-agent-id="${agentId}" data-agent-name="${name}">정보</button>
                             </div>
                         </div>
                     </article>
@@ -4902,6 +5543,7 @@ function toggleBrokerPanel() {
                     if (event.__starOfficeWheelHandled) return;
                     const officeStage = document.getElementById('main-stage');
                     if (officeStage && officeStage.hidden) return;
+                    if (event.target && event.target.closest && event.target.closest('#page-stack')) return;
                     if (event.target && event.target.closest && event.target.closest('#character-menu')) return;
                     if (!isEventInsideOffice(event)) return;
 
@@ -4932,6 +5574,7 @@ function toggleBrokerPanel() {
                     if (event.button !== undefined && event.button !== 0) return;
                     const officeStage = document.getElementById('main-stage');
                     if (officeStage && officeStage.hidden) return;
+                    if (event.target && event.target.closest && event.target.closest('#page-stack')) return;
                     if (event.target && event.target.closest && event.target.closest('#character-menu')) return;
                     if (!isEventInsideOffice(event)) return;
 
