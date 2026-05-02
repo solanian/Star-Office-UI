@@ -394,10 +394,14 @@ def init_chat_db():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     agent_id TEXT NOT NULL UNIQUE,
                     agent_name TEXT NOT NULL,
+                    last_read_message_id INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
             """)
+            existing_conversation_cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()}
+            if "last_read_message_id" not in existing_conversation_cols:
+                conn.execute("ALTER TABLE conversations ADD COLUMN last_read_message_id INTEGER NOT NULL DEFAULT 0")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -414,7 +418,7 @@ def init_chat_db():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     conversation_id INTEGER NOT NULL,
                     user_message_id INTEGER NOT NULL,
-                    status TEXT NOT NULL CHECK (status IN ('pending', 'done', 'error')),
+                    status TEXT NOT NULL CHECK (status IN ('pending', 'finalizing', 'done', 'error')),
                     openclaw_agent_id TEXT,
                     gateway_run_id TEXT,
                     gateway_accepted_at TEXT,
@@ -434,6 +438,46 @@ def init_chat_db():
                 conn.execute("ALTER TABLE chat_turns ADD COLUMN gateway_run_id TEXT")
             if "gateway_accepted_at" not in existing_turn_cols:
                 conn.execute("ALTER TABLE chat_turns ADD COLUMN gateway_accepted_at TEXT")
+            turn_schema = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'chat_turns'"
+            ).fetchone()
+            if turn_schema and "finalizing" not in str(turn_schema[0] or ""):
+                conn.execute("ALTER TABLE chat_turns RENAME TO chat_turns_old")
+                conn.execute("""
+                    CREATE TABLE chat_turns (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        conversation_id INTEGER NOT NULL,
+                        user_message_id INTEGER NOT NULL,
+                        status TEXT NOT NULL CHECK (status IN ('pending', 'finalizing', 'done', 'error')),
+                        openclaw_agent_id TEXT,
+                        gateway_run_id TEXT,
+                        gateway_accepted_at TEXT,
+                        reply_message_id INTEGER,
+                        error_message_id INTEGER,
+                        error_text TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+                        FOREIGN KEY (user_message_id) REFERENCES messages(id) ON DELETE CASCADE,
+                        FOREIGN KEY (reply_message_id) REFERENCES messages(id) ON DELETE SET NULL,
+                        FOREIGN KEY (error_message_id) REFERENCES messages(id) ON DELETE SET NULL
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO chat_turns (
+                        id, conversation_id, user_message_id, status,
+                        openclaw_agent_id, gateway_run_id, gateway_accepted_at,
+                        reply_message_id, error_message_id, error_text,
+                        created_at, updated_at
+                    )
+                    SELECT
+                        id, conversation_id, user_message_id, status,
+                        openclaw_agent_id, gateway_run_id, gateway_accepted_at,
+                        reply_message_id, error_message_id, error_text,
+                        created_at, updated_at
+                    FROM chat_turns_old
+                """)
+                conn.execute("DROP TABLE chat_turns_old")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_turns_conversation_status ON chat_turns(conversation_id, status, id)")
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_turns_one_pending ON chat_turns(conversation_id) WHERE status = 'pending'")
 
@@ -838,7 +882,7 @@ def _run_openclaw_agent_turn(agent_id: str, content: str) -> tuple[str, str]:
 def _get_or_create_conversation(conn, agent_id: str, agent_name: str):
     now_iso = datetime.now().isoformat()
     row = conn.execute(
-        "SELECT id, agent_id, agent_name, created_at, updated_at FROM conversations WHERE agent_id = ?",
+        "SELECT id, agent_id, agent_name, last_read_message_id, created_at, updated_at FROM conversations WHERE agent_id = ?",
         (agent_id,),
     ).fetchone()
     if row:
@@ -848,7 +892,7 @@ def _get_or_create_conversation(conn, agent_id: str, agent_name: str):
                 (agent_name, now_iso, row["id"]),
             )
             row = conn.execute(
-                "SELECT id, agent_id, agent_name, created_at, updated_at FROM conversations WHERE id = ?",
+                "SELECT id, agent_id, agent_name, last_read_message_id, created_at, updated_at FROM conversations WHERE id = ?",
                 (row["id"],),
             ).fetchone()
         return row
@@ -858,7 +902,7 @@ def _get_or_create_conversation(conn, agent_id: str, agent_name: str):
         (agent_id, agent_name, now_iso, now_iso),
     )
     return conn.execute(
-        "SELECT id, agent_id, agent_name, created_at, updated_at FROM conversations WHERE id = ?",
+        "SELECT id, agent_id, agent_name, last_read_message_id, created_at, updated_at FROM conversations WHERE id = ?",
         (cur.lastrowid,),
     ).fetchone()
 
@@ -1114,7 +1158,46 @@ def _conversation_payload(row):
         "agentName": row["agent_name"],
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
+        "lastReadMessageId": row["last_read_message_id"],
     }
+
+
+def _conversation_unread_map(conn) -> dict[str, bool]:
+    rows = conn.execute(
+        """
+        SELECT c.agent_id,
+               EXISTS(
+                   SELECT 1
+                   FROM messages m
+                   WHERE m.conversation_id = c.id
+                     AND m.role = 'agent'
+                     AND m.id > COALESCE(c.last_read_message_id, 0)
+               ) AS has_unread
+        FROM conversations c
+        """
+    ).fetchall()
+    return {row["agent_id"]: bool(row["has_unread"]) for row in rows}
+
+
+def _mark_conversation_read(conn, conversation_id: int):
+    latest_agent_message = conn.execute(
+        """
+        SELECT COALESCE(MAX(id), 0) AS latest_id
+        FROM messages
+        WHERE conversation_id = ? AND role = 'agent'
+        """,
+        (conversation_id,),
+    ).fetchone()
+    latest_id = int((latest_agent_message or {})["latest_id"] or 0)
+    conn.execute(
+        """
+        UPDATE conversations
+        SET last_read_message_id = MAX(COALESCE(last_read_message_id, 0), ?)
+        WHERE id = ?
+        """,
+        (latest_id, conversation_id),
+    )
+    return latest_id
 
 
 def _message_payload(row):
@@ -1816,6 +1899,28 @@ def get_chat_conversation():
         return jsonify({"ok": False, "msg": str(e)}), 500
 
 
+@app.route("/chat/read", methods=["POST"])
+def mark_chat_read():
+    """Mark an agent conversation as read by the user."""
+    try:
+        data = request.get_json()
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "msg": "invalid json"}), 400
+
+        agent_id = _normalize_chat_agent_id(data.get("agentId", ""))
+        agent_name = _normalize_chat_agent_name(data.get("agentName", ""), agent_id)
+        with chat_db_lock:
+            with _chat_db() as conn:
+                conversation = _get_or_create_conversation(conn, agent_id, agent_name)
+                latest_id = _mark_conversation_read(conn, conversation["id"])
+
+        return jsonify({"ok": True, "agentId": agent_id, "lastReadMessageId": latest_id})
+    except ValueError as e:
+        return jsonify({"ok": False, "msg": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
 @app.route("/chat/messages", methods=["POST"])
 def create_chat_message():
     """Append a user message, call the character-linked OpenClaw agent, and store the reply."""
@@ -1951,7 +2056,16 @@ def get_agents():
     save_agents_state(cleaned_agents)
     save_join_keys(keys_data)
 
-    return jsonify(cleaned_agents)
+    with chat_db_lock:
+        with _chat_db() as conn:
+            unread_by_agent = _conversation_unread_map(conn)
+    response_agents = []
+    for agent in cleaned_agents:
+        item = dict(agent)
+        item["hasUnread"] = bool(unread_by_agent.get(item.get("agentId")))
+        response_agents.append(item)
+
+    return jsonify(response_agents)
 
 
 @app.route("/agent-approve", methods=["POST"])

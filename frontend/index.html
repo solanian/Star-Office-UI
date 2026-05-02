@@ -124,6 +124,22 @@
             margin-bottom: 8px;
             word-break: break-word;
         }
+        .agent-name-row,
+        .guest-agent-name-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            min-width: 0;
+        }
+        .agent-unread-dot {
+            width: 10px;
+            height: 10px;
+            flex: 0 0 auto;
+            border-radius: 50%;
+            background: #facc15;
+            border: 1px solid #fff7ad;
+            box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.18);
+        }
         .agent-info {
             display: flex;
             flex-wrap: wrap;
@@ -2153,8 +2169,9 @@
         let lastWanderAt = 0;
 
         let guestAgents = [];
-        let guestSprites = {}; // agentId -> {sprite, nameText}
+        let guestSprites = {}; // agentId -> {sprite, nameText, unreadBubble}
         let guestBubbles = {}; // agentId -> bubble container
+        let mainUnreadBubble = null;
         const GUEST_AVATARS = ['guest_role_1','guest_role_2','guest_role_3','guest_role_4','guest_role_5','guest_role_6'];
         let guestTweens = {};  // agentId -> {move, name}
         let hiddenDemoNames = new Set();
@@ -2491,6 +2508,23 @@
             if (box) box.innerHTML = `<div class="chat-error">${escapeHtml(message || '대화를 불러오지 못했습니다')}</div>`;
         }
 
+        async function markActiveChatRead(messages = []) {
+            const chat = getActiveChatState();
+            if (!chat) return;
+            const hasAgentMessage = Array.isArray(messages) && messages.some(message => (message?.role || '').toLowerCase() === 'agent');
+            if (!hasAgentMessage) return;
+            setAgentUnread(chat.agentId, false);
+            try {
+                await fetch('/chat/read', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ agentId: chat.agentId, agentName: chat.agentName })
+                });
+            } catch (e) {
+                console.warn('읽음 처리 실패:', e);
+            }
+        }
+
         async function loadChatConversation(options = {}) {
             const showLoading = options.showLoading !== false;
             if (!isChatPageVisible()) return;
@@ -2512,6 +2546,7 @@
                 if (!(options.preservePendingRender && hasWaiting && hasRenderedChatWaitingStatus())) {
                     renderChatMessages(messages);
                 }
+                await markActiveChatRead(messages);
                 setChatConversationPending(!!data.pending || hasWaiting);
             } catch (e) {
                 setChatConversationPending(false);
@@ -2746,6 +2781,28 @@
             }
         }
 
+        function getAgentById(agentId) {
+            const id = String(agentId || '').trim();
+            if (!id) return null;
+            return (guestAgents || []).find(agent => String(agent.agentId || '').trim() === id) || null;
+        }
+
+        function setAgentUnread(agentId, hasUnread) {
+            const id = String(agentId || '').trim();
+            if (!id) return;
+            (guestAgents || []).forEach(agent => {
+                if (String(agent.agentId || '').trim() === id) agent.hasUnread = !!hasUnread;
+            });
+            if (DEMO_MODE && Array.isArray(window.__demoVisitors)) {
+                window.__demoVisitors.forEach(agent => {
+                    if (String(agent.agentId || '').trim() === id) agent.hasUnread = !!hasUnread;
+                });
+            }
+            renderAgentsTabList();
+            renderGuestAgentList();
+            renderGuestAgentsInScene();
+        }
+
         function renderAgentsTabList() {
             const list = document.getElementById('agents-card-list');
             if (!list) return;
@@ -2785,12 +2842,13 @@
                 const avatar = isMain
                     ? '<div class="agent-avatar agent-avatar-main" aria-hidden="true"></div>'
                     : `<div class="agent-avatar" aria-hidden="true" style="background-image:url('/static/guest_role_${getAgentAvatarIndex(agent)}.png?v={{VERSION_TIMESTAMP}}')"></div>`;
+                const unreadDot = agent.hasUnread ? '<span class="agent-unread-dot" title="안 읽은 메시지" aria-label="안 읽은 메시지"></span>' : '';
 
                 return `
                     <article class="agent-card ${isMain ? 'agent-card-main' : ''}">
                         ${avatar}
                         <div>
-                            <div class="agent-name">${name}</div>
+                            <div class="agent-name"><span class="agent-name-row"><span>${name}</span>${unreadDot}</span></div>
                             <div class="agent-info">
                                 <span class="agent-pill">상태 ${state}</span>
                                 <span class="agent-pill">${auth}</span>
@@ -4578,6 +4636,68 @@ function toggleBrokerPanel() {
             return [...realVisitors, ...demoVisitors];
         }
 
+        function createUnreadBubbleAt(x, y) {
+            const bg = game.add.rectangle(x, y, 28, 24, 0xffffff, 0.98);
+            bg.setStrokeStyle(2, 0xfacc15);
+            const tail = game.add.triangle(x - 7, y + 13, 0, 0, 10, 0, 2, 8, 0xffffff, 0.98);
+            tail.setStrokeStyle(2, 0xfacc15);
+            const txt = game.add.text(x, y - 1, '!', {
+                fontFamily: 'ArkPixel, monospace',
+                fontSize: '18px',
+                fill: '#111827',
+                fontStyle: 'bold'
+            }).setOrigin(0.5);
+            const bubble = game.add.container(0, 0, [tail, bg, txt]);
+            bubble.setDepth(2800);
+            return bubble;
+        }
+
+        function positionUnreadBubble(bubble, x, y) {
+            if (!bubble || !bubble.list) return;
+            if (bubble.list[0]) { bubble.list[0].x = x - 7; bubble.list[0].y = y + 13; }
+            if (bubble.list[1]) { bubble.list[1].x = x; bubble.list[1].y = y; }
+            if (bubble.list[2]) { bubble.list[2].x = x; bubble.list[2].y = y - 1; }
+        }
+
+        function syncMainUnreadBubble() {
+            if (!game) return;
+            const mainAgent = getAgentById('star');
+            const hasUnread = !!(mainAgent && mainAgent.hasUnread);
+            if (!hasUnread) {
+                if (mainUnreadBubble) {
+                    mainUnreadBubble.destroy();
+                    mainUnreadBubble = null;
+                }
+                return;
+            }
+            const anchor = (window.starWorking && window.starWorking.visible) ? window.starWorking : star;
+            if (!anchor) return;
+            const x = Number(anchor.x || 0) + 28;
+            const y = Number(anchor.y || 0) - Math.max(78, Number(anchor.displayHeight || 120) * 0.42);
+            if (!mainUnreadBubble) mainUnreadBubble = createUnreadBubbleAt(x, y);
+            positionUnreadBubble(mainUnreadBubble, x, y);
+        }
+
+        function syncGuestUnreadBubble(agent) {
+            if (!game || !agent || !agent.agentId) return;
+            const id = agent.agentId;
+            const g = guestSprites[id];
+            if (!g) return;
+            if (!agent.hasUnread) {
+                if (g.unreadBubble) {
+                    g.unreadBubble.destroy();
+                    g.unreadBubble = null;
+                }
+                return;
+            }
+            const nameH = (g.nameText && g.nameText.height) ? g.nameText.height : 16;
+            const x = (g.nameText ? g.nameText.x : g.sprite.x) + Math.max(26, ((g.nameText && g.nameText.width) ? g.nameText.width / 2 + 16 : 26));
+            const y = (g.nameText ? g.nameText.y : (g.sprite.y - 120)) - (nameH / 2) - 18;
+            if (!g.unreadBubble) g.unreadBubble = createUnreadBubbleAt(x, y);
+            g.unreadBubble.__followAgentId = id;
+            positionUnreadBubble(g.unreadBubble, x, y);
+        }
+
         function renderGuestAgentList() {
             const list = document.getElementById('guest-agent-list');
             if (!list) return;
@@ -4610,13 +4730,14 @@ function toggleBrokerPanel() {
                 const statusText = statusMap[authStatus] || authStatus;
                 const stateText = stateMap[state] || state;
                 const subtitle = `${statusText} · ${stateText}`;
+                const unreadDot = agent.hasUnread ? '<span class="agent-unread-dot" title="안 읽은 메시지" aria-label="안 읽은 메시지"></span>' : '';
 
                 const pendingActions = `<button onclick="alert('skill 교환 기능은 준비 중입니다')">skill 교환</button><button class="leave-btn" onclick="leaveGuestAgent('${agent.agentId}','${name}')">나가기</button>`;
 
                 return `
                   <div class="guest-agent-item" data-name="${name}">
                     <div>
-                      <div class="guest-agent-name">${name}</div>
+                      <div class="guest-agent-name"><span class="guest-agent-name-row"><span>${name}</span>${unreadDot}</span></div>
                       <div style="font-size:11px;color:#cbd5e1;">${subtitle}</div>
                     </div>
                     <div class="guest-agent-buttons">
@@ -4770,7 +4891,8 @@ function toggleBrokerPanel() {
                     }).setOrigin(0.5);
                     nameText.setDepth(2601);
 
-                    guestSprites[id] = { sprite, nameText };
+                    guestSprites[id] = { sprite, nameText, unreadBubble: null };
+                    syncGuestUnreadBubble(agent);
                 } else {
                     const g = guestSprites[id];
                     const yOffset = (DEMO_MODE && (agent.agentId === 'demo_mercury' || agent.name === '머큐리')) ? 10 : 0;
@@ -4811,12 +4933,17 @@ function toggleBrokerPanel() {
                     }
 
                     g.nameText.setText(agent.name || '방문자');
+                    syncGuestUnreadBubble(agent);
                 }
             });
+            syncMainUnreadBubble();
 
             // 删除消失的 agent + 清理其气泡/tween
             Object.keys(guestSprites).forEach(id => {
                 if (!seenIds.has(id)) {
+                    if (guestSprites[id].unreadBubble) {
+                        guestSprites[id].unreadBubble.destroy();
+                    }
                     guestSprites[id].sprite.destroy();
                     guestSprites[id].nameText.destroy();
                     delete guestSprites[id];
@@ -5728,6 +5855,11 @@ function toggleBrokerPanel() {
                     if (b.list && b.list[0]) { b.list[0].x = bx; b.list[0].y = by; }
                     if (b.list && b.list[1]) { b.list[1].x = bx; b.list[1].y = by; }
                 });
+            } catch (e) {}
+
+            try {
+                syncMainUnreadBubble();
+                getMergedVisitors().forEach(agent => syncGuestUnreadBubble(agent));
             } catch (e) {}
 
             // guest 列表会定时刷新
