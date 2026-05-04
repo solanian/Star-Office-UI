@@ -25,6 +25,7 @@ type AgentRecord = {
   authRejectedAt?: string;
   lastPushAt: string | null;
   avatar?: string;
+  openclawAgentId?: string;
 };
 
 type JoinKeyRecord = {
@@ -39,6 +40,16 @@ type JoinKeyRecord = {
 };
 
 type JoinKeys = { keys: JoinKeyRecord[] };
+type ChatMessage = {
+  id: string;
+  turnId?: string;
+  role: string;
+  content: string;
+  createdAt: string;
+  read?: boolean;
+  failed?: boolean;
+};
+type ChatStore = Record<string, { messages: ChatMessage[]; queue: Array<Record<string, string>> }>;
 
 const rootDir = path.resolve(process.cwd());
 const dataDir = path.resolve(process.env.STAR_OFFICE_DATA_DIR || rootDir);
@@ -56,6 +67,7 @@ const joinKeysFile = path.join(dataDir, 'join-keys.json');
 const assetPositionsFile = path.join(dataDir, 'asset-positions.json');
 const assetDefaultsFile = path.join(dataDir, 'asset-defaults.json');
 const runtimeConfigFile = path.join(dataDir, 'runtime-config.json');
+const chatStateFile = path.join(dataDir, 'chat-state.json');
 
 const bgHistoryDir = path.join(rootDir, 'assets', 'bg-history');
 const homeFavoritesDir = path.join(rootDir, 'assets', 'home-favorites');
@@ -317,6 +329,19 @@ async function saveMap(file: string, data: Record<string, unknown>) {
   await writeJson(file, data);
 }
 
+function chatKey(agentId: string, agentName = '') {
+  return [agentId || 'star', agentName || 'Agent'].join(':');
+}
+
+async function loadChatStore(): Promise<ChatStore> {
+  const data = await readJson<ChatStore>(chatStateFile, {});
+  return typeof data === 'object' && data !== null && !Array.isArray(data) ? data : {};
+}
+
+async function saveChatStore(data: ChatStore) {
+  await writeJson(chatStateFile, data);
+}
+
 async function ensureHomeFavoritesIndex() {
   await mkdir(homeFavoritesDir, { recursive: true });
   if (!existsSync(homeFavoritesIndexFile)) await writeJson(homeFavoritesIndexFile, { items: [] });
@@ -435,6 +460,8 @@ async function handleJoinAgent(event: RequestEvent) {
 
   const state = normalizeAgentState(data.state);
   const now = new Date().toISOString();
+  const openclawAgentId = String(data.openclawAgentId || '').trim();
+  const avatar = String(data.avatar || '').trim();
   let agentId = existing?.agentId;
   if (existing) {
     existing.state = state;
@@ -447,6 +474,8 @@ async function handleJoinAgent(event: RequestEvent) {
     existing.authApprovedAt = now;
     existing.authExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     existing.lastPushAt = now;
+    if (openclawAgentId) existing.openclawAgentId = openclawAgentId;
+    if (avatar) existing.avatar = avatar;
     existing.avatar ||= randomAvatar();
   } else {
     agentId = `agent_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -464,7 +493,8 @@ async function handleJoinAgent(event: RequestEvent) {
       authApprovedAt: now,
       authExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       lastPushAt: now,
-      avatar: randomAvatar()
+      avatar: avatar || randomAvatar(),
+      ...(openclawAgentId ? { openclawAgentId } : {})
     });
   }
   key.used = true;
@@ -493,12 +523,12 @@ async function handleAgentPush(event: RequestEvent) {
   }
 
   const agents = await loadAgents();
-  const target = agents.find((a) => !a.isMain && a.agentId === agentId);
+  const target = agents.find((a) => a.agentId === agentId);
   if (!target) return json({ ok: false, msg: 'agent 未注册，请先 join' }, 404);
   if (!['approved', 'offline'].includes(target.authStatus)) {
     return json({ ok: false, msg: 'agent 未获授权，请等待主人批准' }, 403);
   }
-  if (target.joinKey !== joinKey) return json({ ok: false, msg: 'joinKey 不匹配' }, 403);
+  if (!target.isMain && target.joinKey !== joinKey) return json({ ok: false, msg: 'joinKey 不匹配' }, 403);
 
   const state = normalizeAgentState(stateRaw);
   const now = new Date().toISOString();
@@ -506,6 +536,8 @@ async function handleAgentPush(event: RequestEvent) {
   target.state = state;
   target.detail = String(data.detail || '');
   if (data.name) target.name = String(data.name);
+  if (data.openclawAgentId) target.openclawAgentId = String(data.openclawAgentId);
+  if (data.avatar) target.avatar = String(data.avatar);
   target.updated_at = now;
   target.area = stateToArea(state);
   target.source = 'remote-openclaw';
@@ -759,6 +791,103 @@ async function handleHomeFavorites(event: RequestEvent, pathname: string) {
   return null;
 }
 
+async function handleChat(event: RequestEvent, pathname: string) {
+  const data = event.request.method === 'GET' ? null : await requestJson(event);
+  const agentId =
+    event.request.method === 'GET'
+      ? String(event.url.searchParams.get('agentId') || 'star').trim()
+      : String(data?.agentId || 'star').trim();
+  const agentName =
+    event.request.method === 'GET'
+      ? String(event.url.searchParams.get('agentName') || agentId || 'Agent').trim()
+      : String(data?.agentName || agentId || 'Agent').trim();
+  const key = chatKey(agentId, agentName);
+  const store = await loadChatStore();
+  const entry = (store[key] ||= { messages: [], queue: [] });
+
+  if (event.request.method === 'GET' && pathname === 'chat/conversation') {
+    return json({ ok: true, messages: entry.messages, queue: entry.queue, pending: false });
+  }
+
+  if (event.request.method === 'POST' && pathname === 'chat/messages') {
+    const content = String(data?.content || '').trim();
+    if (!content) return json({ ok: false, msg: 'message content required' }, 400);
+    const now = new Date().toISOString();
+    const turnId = `turn_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    entry.messages.push({ id: `${turnId}_user`, turnId, role: String(data?.role || 'user'), content, createdAt: now, read: false });
+    await saveChatStore(store);
+    return json({ ok: true, messages: entry.messages, queue: entry.queue, pending: false, queued: false });
+  }
+
+  if (event.request.method === 'POST' && pathname === 'chat/read') {
+    entry.messages = entry.messages.map((message) => ({ ...message, read: true }));
+    await saveChatStore(store);
+    return json({ ok: true });
+  }
+
+  if (pathname.startsWith('chat/queue/') && ['PATCH', 'DELETE'].includes(event.request.method)) {
+    const id = decodeURIComponent(pathname.slice('chat/queue/'.length));
+    if (event.request.method === 'PATCH') {
+      const item = entry.queue.find((x) => x.id === id);
+      if (item) item.content = String(data?.content || item.content || '');
+    } else {
+      entry.queue = entry.queue.filter((x) => x.id !== id);
+    }
+    await saveChatStore(store);
+    return json({ ok: true, queue: entry.queue });
+  }
+
+  if (event.request.method === 'POST' && pathname.startsWith('chat/retry/')) {
+    return json({ ok: true, messages: entry.messages, queue: entry.queue, pending: false });
+  }
+
+  return null;
+}
+
+async function handleAgentInfo(event: RequestEvent, pathname: string) {
+  if (event.request.method === 'GET' && pathname === 'agent-info') {
+    const agentId = String(event.url.searchParams.get('agentId') || 'star').trim();
+    const agents = await loadAgents();
+    const agent = agents.find((a) => a.agentId === agentId) || agents.find((a) => a.isMain) || defaultAgents()[0];
+    return json({
+      ok: true,
+      agent,
+      openclaw: {
+        version: null,
+        auth: '-',
+        workspace: openclawWorkspace || rootDir,
+        modelProvider: null,
+        model: null,
+        modelConfig: { effective: '-' },
+        thinking: { effective: '-' },
+        tokens: { input: 0, output: 0, total: 0, cacheRead: 0, cacheWrite: 0 },
+        context: { used: 0, limit: 0, percent: 0 },
+        queue: { active: 0, queued: 0, running: 0, failures: 0 },
+        server: {},
+        errors: []
+      }
+    });
+  }
+
+  if (event.request.method === 'POST' && ['agent-info/model', 'agent-info/thinking', 'agent-info/context'].includes(pathname)) {
+    const data = await requestJson(event);
+    const action = String(data?.action || '').trim();
+    return json({ ok: true, message: action ? `${action} requested` : 'saved' });
+  }
+
+  return null;
+}
+
+async function handleRemoteAgent(event: RequestEvent, pathname: string) {
+  if (event.request.method === 'GET' && pathname === 'remote-agent/hosts') {
+    return json({ ok: true, hosts: [] });
+  }
+  if (event.request.method === 'POST' && pathname === 'remote-agent/install') {
+    return json({ ok: false, msg: 'Remote agent install is not available in the TypeScript server yet.' }, 501);
+  }
+  return null;
+}
+
 async function restoreBackground(event: RequestEvent, mode: 'reference' | 'last') {
   const guard = requireAssetAuth(event);
   if (guard) return guard;
@@ -844,6 +973,18 @@ export async function handlePath(event: RequestEvent, rawPath = ''): Promise<Res
   if (event.request.method === 'GET' && pathname === 'assets/generate-rpg-background/poll') return handlePoll(event);
   if (event.request.method === 'POST' && pathname === 'assets/restore-reference-background') return restoreBackground(event, 'reference');
   if (event.request.method === 'POST' && pathname === 'assets/restore-last-generated-background') return restoreBackground(event, 'last');
+  if (pathname.startsWith('chat/')) {
+    const result = await handleChat(event, pathname);
+    if (result) return result;
+  }
+  if (pathname === 'agent-info' || pathname.startsWith('agent-info/')) {
+    const result = await handleAgentInfo(event, pathname);
+    if (result) return result;
+  }
+  if (pathname === 'remote-agent/hosts' || pathname === 'remote-agent/install') {
+    const result = await handleRemoteAgent(event, pathname);
+    if (result) return result;
+  }
   if (pathname.startsWith('assets/home-favorites/')) {
     const result = await handleHomeFavorites(event, pathname);
     if (result) return result;

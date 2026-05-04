@@ -1,0 +1,39 @@
+services:
+  clawffice:
+    image: clawffice:latest
+    container_name: clawffice
+    restart: unless-stopped
+    environment:
+      NODE_ENV: "production"
+      HOST: "0.0.0.0"
+      PORT: "19000"
+      ORIGIN: "${CLAWFFICE_ORIGIN:-http://127.0.0.1:19000}"
+      STAR_OFFICE_ENV: "${STAR_OFFICE_ENV:-production}"
+      STAR_OFFICE_DATA_DIR: "/data"
+      STAR_OFFICE_SECRET: "${STAR_OFFICE_SECRET:?set STAR_OFFICE_SECRET in Portainer stack variables}"
+      ASSET_DRAWER_PASS: "${ASSET_DRAWER_PASS:?set ASSET_DRAWER_PASS in Portainer stack variables}"
+      OPENCLAW_WORKSPACE: "/app"
+      OPENCLAW_HOME: "/home/opc"
+      OPENCLAW_CLI: "${OPENCLAW_CLI:-/home/opc/.npm-global/bin/openclaw}"
+      OPENCLAW_CHAT_AGENT: "${OPENCLAW_CHAT_AGENT:-clawffice manager}"
+      OPENCLAW_CHAT_TIMEOUT: "${OPENCLAW_CHAT_TIMEOUT:-1800}"
+      OPENCLAW_CHAT_SEND_TIMEOUT: "${OPENCLAW_CHAT_SEND_TIMEOUT:-120}"
+      HOME: "/home/opc"
+      PATH: "/home/opc/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      LD_LIBRARY_PATH: "/openclaw-node-libs"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-nanobanana-pro}"
+    ports:
+      - "${CLAWFFICE_HOST_PORT:-19000}:19000"
+    volumes:
+      - clawffice-data:/data
+      - /home/opc/workspace/clawffice/frontend:/app/frontend
+      - /home/opc/workspace/clawffice/assets:/app/assets
+      - /home/opc/workspace/clawffice/memory:/memory
+      - /home/opc/.openclaw:/home/opc/.openclaw
+      - /home/opc/.npm-global:/home/opc/.npm-global:ro
+      - /usr/bin/node:/usr/bin/node:ro
+      - /home/opc/workspace/clawffice/.runtime/openclaw-node-libs:/openclaw-node-libs:ro
+
+volumes:
+  clawffice-data:

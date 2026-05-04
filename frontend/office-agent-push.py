@@ -16,8 +16,11 @@ import sys
 from datetime import datetime
 
 # === 你需要填入的信息 ===
-JOIN_KEY = os.environ.get("OFFICE_JOIN_KEY", "")   # 必填：你的一次性 join key
-AGENT_NAME = os.environ.get("OFFICE_AGENT_NAME", "") # 必填：你在办公室里的名字
+JOIN_KEY = os.environ.get("OFFICE_JOIN_KEY", "")   # 필수: 상태 푸시에 사용할 접속 키
+AGENT_NAME = os.environ.get("OFFICE_AGENT_NAME", "Star").strip() # 오피스에 표시할 이름
+AGENT_ID = os.environ.get("OFFICE_AGENT_ID", "").strip() # 선택: star로 지정하면 메인 캐릭터에 직접 연결
+OPENCLAW_AGENT_ID = os.environ.get("OFFICE_OPENCLAW_AGENT_ID", "").strip() # Web UI 대화가 호출할 OpenClaw agent id
+AGENT_AVATAR = os.environ.get("OFFICE_AGENT_AVATAR", "").strip() # guest_role_1..guest_role_6
 OFFICE_URL = os.environ.get("OFFICE_URL", "https://office.hyacinth.im")  # 海辛办公室地址（一般不用改）
 
 # === 推送配置 ===
@@ -33,10 +36,18 @@ STALE_STATE_TTL_SECONDS = int(os.environ.get("OFFICE_STALE_STATE_TTL", "600"))
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "office-agent-state.json")
 
 # 优先读取本机 OpenClaw 工作区的状态文件（更贴合 AGENTS.md 的工作流）
-# 支持自动发现，减少对方手动配置成本。
+# 支持自动发现，减少对方手动配置成本，且避免硬编码绝对路径：
+# - 优先使用环境变量 OPENCLAW_HOME / OPENCLAW_WORKSPACE_DIR
+# - 其次使用当前用户 HOME/.openclaw
+# - 再回落到当前工作目录与脚本所在目录
+OPENCLAW_HOME = os.environ.get("OPENCLAW_HOME") or os.path.join(os.path.expanduser("~"), ".openclaw")
+OPENCLAW_WORKSPACE_DIR = os.environ.get("OPENCLAW_WORKSPACE_DIR") or os.path.join(OPENCLAW_HOME, "workspace")
+
 DEFAULT_STATE_CANDIDATES = [
-    "/root/.openclaw/workspace/Star-Office-UI/state.json",  # 当前仓库（大小写精确）
-    "/root/.openclaw/workspace/star-office-ui/state.json",  # 历史/兼容路径
+    os.path.join(OPENCLAW_WORKSPACE_DIR, "clawffice", "state.json"),
+    os.path.join(OPENCLAW_WORKSPACE_DIR, "state.json"),
+    "/root/.openclaw/workspace/clawffice/state.json",  # 当前仓库（大小写精确）
+    "/root/.openclaw/workspace/clawffice/state.json",  # 历史/兼容路径
     "/root/.openclaw/workspace/state.json",
     os.path.join(os.getcwd(), "state.json"),
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json"),
@@ -57,12 +68,16 @@ def load_local_state():
                 return json.load(f)
         except Exception:
             pass
-    return {
+    data = {
         "agentId": None,
         "joined": False,
         "joinKey": JOIN_KEY,
         "agentName": AGENT_NAME
     }
+    if AGENT_ID:
+        data["agentId"] = AGENT_ID
+        data["joined"] = True
+    return data
 
 
 def save_local_state(data):
@@ -155,7 +170,7 @@ def fetch_local_status():
                     age = _state_age_seconds(data)
                     if age is not None and age > STALE_STATE_TTL_SECONDS:
                         state = "idle"
-                        detail = f"本地状态超过{STALE_STATE_TTL_SECONDS}s未更新，自动回待命"
+                        detail = f"로컬 상태가 {STALE_STATE_TTL_SECONDS}초 동안 갱신되지 않아 자동으로 대기 상태로 전환했습니다"
 
                     if VERBOSE:
                         print(f"[status-source:file] path={fp} state={state} detail={detail[:60]}")
@@ -179,21 +194,21 @@ def fetch_local_status():
             age = _state_age_seconds(data)
             if age is not None and age > STALE_STATE_TTL_SECONDS:
                 state = "idle"
-                detail = f"本地/status 超过{STALE_STATE_TTL_SECONDS}s未更新，自动回待命"
+                detail = f"로컬 /status가 {STALE_STATE_TTL_SECONDS}초 동안 갱신되지 않아 자동으로 대기 상태로 전환했습니다"
 
             if VERBOSE:
                 print(f"[status-source:http] url={LOCAL_STATUS_URL} state={state} detail={detail[:60]}")
             return {"state": state, "detail": detail}
         # 如果 401，说明需要 token
         if r.status_code == 401:
-            return {"state": "idle", "detail": "本地/status需要鉴权（401），请设置 OFFICE_LOCAL_STATUS_TOKEN"}
+            return {"state": "idle", "detail": "로컬 /status 인증이 필요합니다(401). OFFICE_LOCAL_STATUS_TOKEN을 설정해주세요"}
     except Exception:
         pass
 
     # 3) 默认 fallback
     if VERBOSE:
-        print("[status-source:fallback] state=idle detail=待命中")
-    return {"state": "idle", "detail": "待命中"}
+        print("[status-source:fallback] state=idle detail=대기 중")
+    return {"state": "idle", "detail": "대기 중"}
 
 
 def do_join(local):
@@ -202,8 +217,12 @@ def do_join(local):
         "name": local.get("agentName", AGENT_NAME),
         "joinKey": local.get("joinKey", JOIN_KEY),
         "state": "idle",
-        "detail": "刚刚加入"
+        "detail": "방금 참여했습니다"
     }
+    if OPENCLAW_AGENT_ID:
+        payload["openclawAgentId"] = OPENCLAW_AGENT_ID
+    if AGENT_AVATAR:
+        payload["avatar"] = AGENT_AVATAR
     r = requests.post(f"{OFFICE_URL}{JOIN_ENDPOINT}", json=payload, timeout=10)
     if r.status_code in (200, 201):
         data = r.json()
@@ -211,9 +230,9 @@ def do_join(local):
             local["joined"] = True
             local["agentId"] = data.get("agentId")
             save_local_state(local)
-            print(f"✅ 已加入海辛办公室，agentId={local['agentId']}")
+            print(f"✅ clawffice에 참여했습니다. agentId={local['agentId']}")
             return True
-    print(f"❌ 加入失败：{r.text}")
+    print(f"❌ 참여 실패: {r.text}")
     return False
 
 
@@ -226,12 +245,16 @@ def do_push(local, status_data):
         "detail": status_data.get("detail", ""),
         "name": local.get("agentName", AGENT_NAME)
     }
+    if OPENCLAW_AGENT_ID:
+        payload["openclawAgentId"] = OPENCLAW_AGENT_ID
+    if AGENT_AVATAR:
+        payload["avatar"] = AGENT_AVATAR
     r = requests.post(f"{OFFICE_URL}{PUSH_ENDPOINT}", json=payload, timeout=10)
     if r.status_code in (200, 201):
         data = r.json()
         if data.get("ok"):
             area = data.get("area", "breakroom")
-            print(f"✅ 状态已同步，当前区域={area}")
+            print(f"✅ 상태를 동기화했습니다. 현재 영역={area}")
             return True
 
     # 403/404：拒绝/移除 → 停止推送
@@ -241,44 +264,62 @@ def do_push(local, status_data):
             msg = (r.json() or {}).get("msg", "")
         except Exception:
             msg = r.text
-        print(f"⚠️  访问拒绝或已移出房间（{r.status_code}），停止推送：{msg}")
+        print(f"⚠️  접근이 거부되었거나 오피스에서 제거되었습니다({r.status_code}). 푸시를 중지합니다: {msg}")
         local["joined"] = False
         local["agentId"] = None
         save_local_state(local)
         sys.exit(1)
 
-    print(f"⚠️  推送失败：{r.text}")
+    print(f"⚠️  푸시 실패: {r.text}")
     return False
 
 
 def main():
     local = load_local_state()
+    if AGENT_ID:
+        local["agentId"] = AGENT_ID
+        local["joined"] = True
+        local["agentName"] = AGENT_NAME
+        local["joinKey"] = JOIN_KEY
+        save_local_state(local)
+
+    # Startup hint for state source and URL (helps with port/state issues, e.g. issue #31)
+    if LOCAL_STATE_FILE:
+        print(f"State file: {LOCAL_STATE_FILE}")
+    else:
+        first_existing = next((p for p in DEFAULT_STATE_CANDIDATES if p and os.path.exists(p)), None)
+        if first_existing:
+            print(f"State file (auto): {first_existing}")
+        else:
+            print("State file: auto-discover (set OFFICE_LOCAL_STATE_FILE if state not found)")
+    print(f"Local status URL: {LOCAL_STATUS_URL} (set OFFICE_LOCAL_STATUS_URL if backend uses another port)")
 
     # 先确认配置是否齐全
     if not JOIN_KEY or not AGENT_NAME:
-        print("❌ 请先在脚本开头填入 JOIN_KEY 和 AGENT_NAME")
+        print("❌ 먼저 JOIN_KEY와 AGENT_NAME을 설정해주세요")
         sys.exit(1)
 
-    # 如果之前没 join，先 join
-    if not local.get("joined") or not local.get("agentId"):
+    if AGENT_ID:
+        print(f"⭐ 기존 OpenClaw 상태를 Star에 직접 연결합니다. agentId={AGENT_ID}")
+    elif not local.get("joined") or not local.get("agentId"):
         ok = do_join(local)
         if not ok:
             sys.exit(1)
 
     # 持续推送
-    print(f"🚀 开始持续推送状态，间隔={PUSH_INTERVAL_SECONDS}秒")
-    print("🧭 状态逻辑：任务中→工作区；待命/完成→休息区；异常→bug区")
-    print("🔐 若本地 /status 返回 Unauthorized(401)，请设置环境变量：OFFICE_LOCAL_STATUS_TOKEN 或 OFFICE_LOCAL_STATUS_URL")
+    print(f"🚀 상태 지속 푸시를 시작합니다. 간격={PUSH_INTERVAL_SECONDS}초")
+    print("🧭 상태 로직: 작업 중→작업 구역, 대기/완료→휴게 구역, 오류→bug 구역")
+    print("🔐 로컬 /status가 Unauthorized(401)를 반환하면 OFFICE_LOCAL_STATUS_TOKEN 또는 OFFICE_LOCAL_STATUS_URL을 설정해주세요")
     try:
         while True:
             try:
                 status_data = fetch_local_status()
                 do_push(local, status_data)
             except Exception as e:
-                print(f"⚠️  推送异常：{e}")
+                print(f"⚠️  푸시 예외: {e}")
             time.sleep(PUSH_INTERVAL_SECONDS)
     except KeyboardInterrupt:
-        print("\n👋 停止推送")
+        print("\n👋 푸시를 중지합니다")
         sys.exit(0)
 
 

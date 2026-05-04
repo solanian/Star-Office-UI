@@ -164,6 +164,27 @@ async function main() {
     console.log('  OK home favorites');
   }
 
+  {
+    const info = await req('/agent-info?agentId=star');
+    assert(info.res.status === 200 && info.body.ok && info.body.agent, '/agent-info');
+
+    const model = await req('/agent-info/model', { method: 'POST', json: { agentId: 'star', model: 'test-model' } });
+    assert(model.res.status === 200 && model.body.ok, '/agent-info/model');
+
+    const hosts = await req('/remote-agent/hosts');
+    assert(hosts.res.status === 200 && hosts.body.ok && Array.isArray(hosts.body.hosts), '/remote-agent/hosts');
+
+    const convo = await req('/chat/conversation?agentId=star&agentName=Star');
+    assert(convo.res.status === 200 && convo.body.ok && Array.isArray(convo.body.messages), '/chat/conversation');
+
+    const msg = await req('/chat/messages', { method: 'POST', json: { agentId: 'star', agentName: 'Star', role: 'user', content: 'hello' } });
+    assert(msg.res.status === 200 && msg.body.ok && msg.body.messages.some((x) => x.content === 'hello'), '/chat/messages');
+
+    const read = await req('/chat/read', { method: 'POST', json: { agentId: 'star', agentName: 'Star' } });
+    assert(read.res.status === 200 && read.body.ok, '/chat/read');
+    console.log('  OK chat/agent info compatibility');
+  }
+
   console.log('\n[contract] PASS');
 }
 

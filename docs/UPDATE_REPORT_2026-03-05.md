@@ -70,7 +70,7 @@
 - `join-keys.json` 中每个 key 支持 `expiresAt` 字段（ISO 8601 时间戳）
 - `join-agent` 和 `agent-push` 两个端点在执行前都会检查 key 是否过期
 - 过期后返回友好提示："该接入密钥已过期，活动已结束 🎉"
-- 支持 `maxConcurrent` 字段控制同一个 key 的并发在线数
+- 2026-05-01 기준 현재 배포에서는 같은 key의 동시 agent 수 제한을 제거했습니다.
 
 ---
 

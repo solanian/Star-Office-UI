@@ -426,10 +426,10 @@ fn find_project_root() -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
         let home = PathBuf::from(home);
         let candidates = [
-            home.join("Documents").join("GitHub").join("Star-Office-UI"),
-            home.join("GitHub").join("Star-Office-UI"),
-            home.join("Documents").join("Star-Office-UI"),
-            home.join("Star-Office-UI"),
+            home.join("Documents").join("GitHub").join("clawffice"),
+            home.join("GitHub").join("clawffice"),
+            home.join("Documents").join("clawffice"),
+            home.join("clawffice"),
         ];
         for candidate in candidates {
             if candidate.join("package.json").exists() && candidate.join("frontend").join("index.html").exists() {
@@ -465,7 +465,6 @@ fn spawn_backend(root: &PathBuf) -> Option<Child> {
     if let Ok(custom_npm) = std::env::var("STAR_BACKEND_NPM") {
         candidates.insert(0, (PathBuf::from(custom_npm), vec!["run".to_string(), script_name.to_string()]));
     }
-
     for (bin, args) in candidates {
         let mut cmd = Command::new(&bin);
         cmd.current_dir(root)
