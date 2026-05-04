@@ -2824,6 +2824,7 @@
         let chatPendingPollInFlight = false;
         let chatSubmitInFlight = false;
         let chatConversationPending = false;
+        let chatRenderedMessageKeys = [];
 
         function showStackPage(pageId) {
             const stack = document.getElementById('page-stack');
@@ -2849,6 +2850,7 @@
                 stopChatWaitingStatus();
                 stopChatPendingPoll();
                 chatConversationPending = false;
+                chatRenderedMessageKeys = [];
                 updateChatComposerState();
                 return;
             }
@@ -2974,15 +2976,21 @@
             return /연결\s*실패|호출\s*실패|실행\s*실패|GatewayTransportError|Unauthorized|timeout|error/i.test(text);
         }
 
+        function chatMessageKey(message) {
+            if (message?.id !== undefined && message?.id !== null) return String(message.id);
+            return [message?.role || 'message', message?.createdAt || '', message?.content || ''].join(':');
+        }
+
         function renderChatMessage(message, options = {}) {
             const agentName = activeChat?.agentName || 'Agent';
             const role = (message.role || 'user').toLowerCase();
+            const keyAttr = `data-chat-message-key="${escapeHtml(chatMessageKey(message))}"`;
             if (role === 'system') {
                 if (isChatWaitingText(message.content)) {
-                    return `<div class="chat-status-text chat-status-waiting" data-chat-waiting-status>${escapeHtml(formatChatWaitingText(0))}</div>`;
+                    return `<div class="chat-status-text chat-status-waiting" ${keyAttr} data-chat-waiting-status>${escapeHtml(formatChatWaitingText(0))}</div>`;
                 }
                 const errorClass = isChatErrorText(message.content) ? ' chat-status-error' : '';
-                return `<div class="chat-status-text${errorClass}">${escapeHtml(message.content || '')}</div>`;
+                return `<div class="chat-status-text${errorClass}" ${keyAttr}>${escapeHtml(message.content || '')}</div>`;
             }
             const label = role === 'user' ? '나' : role === 'agent' ? agentName : '시스템';
             const roleClass = role === 'user' ? ' chat-message-user' : '';
@@ -2999,10 +3007,10 @@
                 </article>
             `;
             if (role === 'user') {
-                return `<div class="chat-user-line">${readReceipt}${bubble}</div>`;
+                return `<div class="chat-user-line" ${keyAttr}>${readReceipt}${bubble}</div>`;
             }
             return `
-                <article class="chat-message${roleClass}">
+                <article class="chat-message${roleClass}" ${keyAttr}>
                     <div class="chat-message-meta">
                         <span>${escapeHtml(label)}</span>
                         <span>${escapeHtml(formatChatTime(message.createdAt))}</span>
@@ -3017,6 +3025,7 @@
             if (!box) return false;
             if (!Array.isArray(messages) || messages.length === 0) {
                 box.innerHTML = '<div class="chat-empty">아직 대화가 없습니다</div>';
+                chatRenderedMessageKeys = [];
                 return false;
             }
             box.innerHTML = messages.map((message, index) => {
@@ -3024,13 +3033,62 @@
                 const read = isUser && (typeof message.read === 'boolean' ? message.read : hasAgentReplyAfter(messages, index));
                 return renderChatMessage(message, { read });
             }).join('');
+            chatRenderedMessageKeys = messages.map(chatMessageKey);
             box.scrollTop = box.scrollHeight;
+            return hasChatWaitingMessages(messages);
+        }
+
+        function appendChatMessages(messages, startIndex = 0) {
+            const box = document.getElementById('chat-messages');
+            if (!box || !Array.isArray(messages) || startIndex >= messages.length) return;
+            const html = messages.slice(startIndex).map((message, offset) => {
+                const index = startIndex + offset;
+                const isUser = (message.role || '').toLowerCase() === 'user';
+                const read = isUser && (typeof message.read === 'boolean' ? message.read : hasAgentReplyAfter(messages, index));
+                return renderChatMessage(message, { read });
+            }).join('');
+            if (html) {
+                box.insertAdjacentHTML('beforeend', html);
+                box.scrollTop = box.scrollHeight;
+            }
+            chatRenderedMessageKeys = messages.map(chatMessageKey);
+        }
+
+        function syncChatMessages(messages, options = {}) {
+            const box = document.getElementById('chat-messages');
+            if (!box) return false;
+            if (options.replace || !chatRenderedMessageKeys.length || box.querySelector('.chat-empty, .chat-error')) {
+                return renderChatMessages(messages);
+            }
+            if (!Array.isArray(messages) || messages.length === 0) {
+                return renderChatMessages(messages);
+            }
+            const nextKeys = messages.map(chatMessageKey);
+            let mismatchIndex = 0;
+            while (
+                mismatchIndex < chatRenderedMessageKeys.length
+                && mismatchIndex < nextKeys.length
+                && chatRenderedMessageKeys[mismatchIndex] === nextKeys[mismatchIndex]
+            ) {
+                mismatchIndex += 1;
+            }
+            if (mismatchIndex === chatRenderedMessageKeys.length) {
+                appendChatMessages(messages, mismatchIndex);
+                return hasChatWaitingMessages(messages);
+            }
+            const rerenderFrom = Math.max(0, mismatchIndex - 1);
+            chatRenderedMessageKeys.slice(rerenderFrom).forEach((key) => {
+                const selector = `[data-chat-message-key="${CSS.escape(key)}"]`;
+                box.querySelector(selector)?.remove();
+            });
+            appendChatMessages(messages, rerenderFrom);
             return hasChatWaitingMessages(messages);
         }
 
         function renderChatError(message) {
             const box = document.getElementById('chat-messages');
             if (box) box.innerHTML = `<div class="chat-error">${escapeHtml(message || '대화를 불러오지 못했습니다')}</div>`;
+            chatRenderedMessageKeys = [];
         }
 
         async function markActiveChatRead(messages = []) {
@@ -3069,7 +3127,7 @@
                 const messages = data.messages || [];
                 const hasWaiting = hasChatWaitingMessages(messages);
                 if (!(options.preservePendingRender && hasWaiting && hasRenderedChatWaitingStatus())) {
-                    renderChatMessages(messages);
+                    syncChatMessages(messages, { replace: showLoading });
                 }
                 await markActiveChatRead(messages);
                 setChatConversationPending(!!data.pending || hasWaiting);
@@ -3091,6 +3149,7 @@
             stopChatWaitingStatus();
             chatConversationPending = false;
             chatSubmitInFlight = false;
+            chatRenderedMessageKeys = [];
             activeChat = { agentId: normalizedAgentId, agentName: normalizedAgentName };
             const page = document.getElementById('chat-page');
             if (page) {
@@ -3146,6 +3205,7 @@
 	                    box.insertAdjacentHTML('beforeend', pending.map((message) => (
 	                        renderChatMessage(message, { read: false })
 	                    )).join(''));
+	                    chatRenderedMessageKeys = chatRenderedMessageKeys.concat(pending.map(chatMessageKey));
 	                    box.scrollTop = box.scrollHeight;
 	                }
 	            }
@@ -3164,9 +3224,8 @@
 	                });
 	                const data = await response.json();
 	                if (!response.ok || !data.ok) throw new Error(data.msg || '메시지를 저장하지 못했습니다');
-	                await loadChatConversation();
 	            } catch (e) {
-	                await loadChatConversation();
+	                await loadChatConversation({ showLoading: false });
 	                if (statusText) statusText.textContent = e.message || String(e);
 	            } finally {
 	                chatSubmitInFlight = false;
