@@ -1,0 +1,29 @@
+{
+  "name": "star-office-ui",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 19000",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 19000",
+    "start": "node build/index.js",
+    "test": "npm run build && node scripts/run-ts-contract-test.mjs",
+    "test:contract": "node scripts/run-ts-contract-test.mjs",
+    "check": "svelte-kit sync && tsc --noEmit"
+  },
+  "dependencies": {
+    "@sveltejs/adapter-node": "^5.4.0",
+    "@sveltejs/kit": "^2.49.2",
+    "@sveltejs/vite-plugin-svelte": "^6.2.2",
+    "mime": "^4.1.0",
+    "sharp": "^0.34.5",
+    "svelte": "^5.45.2",
+    "vite": "^7.3.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.2",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,26 @@
+services:
+  star-office-ui:
+    build:
+      context: .
+    image: star-office-ui:typescript
+    container_name: star-office-ui
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 19000
+      ORIGIN: http://127.0.0.1:19000
+      STAR_OFFICE_DATA_DIR: /data
+      # Set these before exposing the service publicly.
+      # STAR_OFFICE_SECRET: change-me-to-a-long-random-secret
+      # ASSET_DRAWER_PASS: change-me
+    ports:
+      - "19000:19000"
+    volumes:
+      - star-office-data:/data
+      # Keep mutable UI assets persistent during asset-drawer edits.
+      - ./frontend:/app/frontend
+      - ./assets:/app/assets
+    restart: unless-stopped
+
+volumes:
+  star-office-data:
