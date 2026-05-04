@@ -148,7 +148,7 @@ async function writeJson(file: string, data: unknown) {
   await writeFile(file, JSON.stringify(data, null, 2), 'utf8');
 }
 
-function normalizeAgentState(value: unknown): AgentState {
+export function normalizeAgentState(value: unknown): AgentState {
   const s = String(value || '').trim().toLowerCase();
   if (['working', 'busy', 'write'].includes(s)) return 'writing';
   if (['run', 'running', 'execute', 'exec'].includes(s)) return 'executing';
@@ -157,7 +157,7 @@ function normalizeAgentState(value: unknown): AgentState {
   return validStates.has(s as AgentState) ? (s as AgentState) : 'idle';
 }
 
-function stateToArea(state: AgentState) {
+export function stateToArea(state: AgentState) {
   if (state === 'idle') return 'breakroom';
   if (state === 'error') return 'error';
   return 'writing';
@@ -641,7 +641,7 @@ async function handlePositionMap(event: RequestEvent, file: string) {
   return json({ ok: true, key, x, y, scale });
 }
 
-function normalizeUserModel(model: string) {
+export function normalizeUserModel(model: string) {
   const m = model.trim().toLowerCase();
   if (m === 'nanobanana-2' || m === 'gemini-2.5-flash-image') return 'nanobanana-2';
   return 'nanobanana-pro';

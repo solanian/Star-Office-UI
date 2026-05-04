@@ -23,6 +23,29 @@ Required endpoints:
 
 Create a TypeScript test suite that starts the server with an isolated temporary data directory and verifies the API contract.
 
+## Unit Tests
+
+Pure server helpers must be covered without starting the HTTP server:
+
+```bash
+npm run test:unit
+```
+
+Required groups:
+
+1. Agent state normalization
+   - Legacy aliases such as `working`, `busy`, `run`, `sync`, and `research` normalize to the canonical states used by the UI.
+   - Missing or unknown states normalize to `idle`.
+
+2. Office area mapping
+   - `idle` maps to `breakroom`.
+   - `error` maps to `error`.
+   - Active states map to `writing`.
+
+3. Gemini model normalization
+   - `nanobanana-2` and the legacy `gemini-2.5-flash-image` value normalize to the stored `nanobanana-2` alias.
+   - Unknown values fall back to the default `nanobanana-pro` alias used by the UI.
+
 Required groups:
 
 1. Page/static responses

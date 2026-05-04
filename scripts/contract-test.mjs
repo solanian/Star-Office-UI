@@ -11,6 +11,7 @@ function assert(condition, message) {
 async function req(path, options = {}) {
   const headers = new Headers(options.headers || {});
   if (cookie) headers.set('cookie', cookie);
+  if (String(options.method || '').toUpperCase() === 'POST' && !headers.has('origin')) headers.set('origin', base);
   if (options.json !== undefined) {
     headers.set('content-type', 'application/json');
     options.body = JSON.stringify(options.json);
@@ -53,6 +54,10 @@ async function main() {
     assert(set.res.status === 200 && set.body.status === 'ok', '/set_state write');
     const after = await req('/status');
     assert(after.body.state === 'writing' && after.body.detail === 'contract writing', '/status after write');
+    const invalid = await req('/set_state', { method: 'POST', json: { state: 'not-a-state', detail: 'invalid detail' } });
+    assert(invalid.res.status === 200, '/set_state invalid state response');
+    const afterInvalid = await req('/status');
+    assert(afterInvalid.body.state === 'writing' && afterInvalid.body.detail === 'invalid detail', '/status invalid state preserves previous state');
     await req('/set_state', { method: 'POST', json: { state: 'idle', detail: 'contract idle' } });
     console.log('  OK status/set_state');
   }
@@ -96,15 +101,41 @@ async function main() {
     assert(pos.res.status === 200 && pos.body.ok, '/assets/positions post');
     const posGet = await req('/assets/positions');
     assert(posGet.body.items['contract.asset'].x === 1, '/assets/positions get');
+    const defaults = await req('/assets/defaults', { method: 'POST', json: { key: 'contract.default', x: 3, y: 4, scale: 2 } });
+    assert(defaults.res.status === 200 && defaults.body.ok, '/assets/defaults post');
+    const defaultsGet = await req('/assets/defaults');
+    assert(defaultsGet.body.items['contract.default'].scale === 2, '/assets/defaults get');
     console.log('  OK asset auth/positions');
   }
 
   {
     const list = await req('/assets/list');
     assert(list.res.status === 200 && list.body.ok && list.body.count > 0, '/assets/list');
+    assert(!list.body.items.some((item) => String(item.path).startsWith('fonts/')), '/assets/list excludes fonts');
+
+    const traversalForm = new FormData();
+    traversalForm.set('path', '../escape.png');
+    traversalForm.set('file', new File(['x'], 'escape.png', { type: 'image/png' }));
+    const traversal = await req('/assets/upload', { method: 'POST', body: traversalForm });
+    assert(traversal.res.status === 400, '/assets/upload rejects path traversal');
+
+    const unsupportedForm = new FormData();
+    unsupportedForm.set('path', 'contract.txt');
+    unsupportedForm.set('file', new File(['x'], 'contract.txt', { type: 'text/plain' }));
+    const unsupported = await req('/assets/upload', { method: 'POST', body: unsupportedForm });
+    assert(unsupported.res.status === 400, '/assets/upload rejects unsupported extension');
+
+    const restoreDefault = await req('/assets/restore-default', { method: 'POST', json: { path: 'contract-missing.png' } });
+    assert([400, 404].includes(restoreDefault.res.status), '/assets/restore-default stable missing asset response');
+    const restorePrev = await req('/assets/restore-prev', { method: 'POST', json: { path: 'contract-missing.png' } });
+    assert([400, 404].includes(restorePrev.res.status), '/assets/restore-prev stable missing asset response');
 
     const gemini = await req('/config/gemini');
     assert(gemini.res.status === 200 && gemini.body.ok, '/config/gemini get');
+    const geminiPost = await req('/config/gemini', { method: 'POST', json: { model: 'gemini-2.5-flash-image' } });
+    assert(geminiPost.res.status === 200 && geminiPost.body.ok, '/config/gemini post');
+    const geminiAfter = await req('/config/gemini');
+    assert(geminiAfter.body.gemini_model === 'nanobanana-2', '/config/gemini normalized model');
 
     const gen = await req('/assets/generate-rpg-background', { method: 'POST', json: {} });
     assert(gen.res.status === 400 && gen.body.code === 'MISSING_API_KEY', '/assets/generate-rpg-background missing key');
@@ -112,6 +143,25 @@ async function main() {
     const poll = await req('/assets/generate-rpg-background/poll?task_id=missing');
     assert(poll.res.status === 404, '/assets/generate-rpg-background/poll missing');
     console.log('  OK assets/gemini preflight');
+  }
+
+  {
+    const listBefore = await req('/assets/home-favorites/list');
+    assert(listBefore.res.status === 200 && listBefore.body.ok && Array.isArray(listBefore.body.items), '/assets/home-favorites/list');
+
+    const save = await req('/assets/home-favorites/save-current', { method: 'POST', json: {} });
+    assert(save.res.status === 200 && save.body.ok && save.body.id, '/assets/home-favorites/save-current');
+    const id = save.body.id;
+
+    const apply = await req('/assets/home-favorites/apply', { method: 'POST', json: { id } });
+    assert(apply.res.status === 200 && apply.body.ok, '/assets/home-favorites/apply');
+
+    const del = await req('/assets/home-favorites/delete', { method: 'POST', json: { id } });
+    assert(del.res.status === 200 && del.body.ok, '/assets/home-favorites/delete');
+
+    const missingApply = await req('/assets/home-favorites/apply', { method: 'POST', json: { id } });
+    assert(missingApply.res.status === 404, '/assets/home-favorites/apply missing id');
+    console.log('  OK home favorites');
   }
 
   console.log('\n[contract] PASS');
